@@ -72,7 +72,7 @@ public class OutboundController {
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         Outbound existed = outboundService.getById(id);
-        outboundService.removeById(id);
+        outboundService.deleteWithItems(id);
         operationLogService.record("outbound", "DELETE", id, existed != null ? existed.getOutboundNo() : null, null, null);
         return Result.ok();
     }

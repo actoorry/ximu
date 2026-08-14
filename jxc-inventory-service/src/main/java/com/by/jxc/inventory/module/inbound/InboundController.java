@@ -86,7 +86,7 @@ public class InboundController {
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         Inbound existed = inboundService.getById(id);
-        inboundService.removeById(id);
+        inboundService.deleteWithItems(id);
         operationLogService.record("inbound", "DELETE", id, existed != null ? existed.getInboundNo() : null, null, null);
         return Result.ok();
     }

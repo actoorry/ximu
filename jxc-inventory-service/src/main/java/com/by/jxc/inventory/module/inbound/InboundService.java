@@ -141,6 +141,18 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         }
     }
 
+    /**
+     * 级联删除：先删明细，再删头（同事务）。
+     */
+    @Transactional
+    public void deleteWithItems(Long id) {
+        if (id == null) {
+            return;
+        }
+        inboundItemMapper.delete(new LambdaQueryWrapper<InboundItem>().eq(InboundItem::getInboundId, id));
+        removeById(id);
+    }
+
     /** 查询头 + 明细，组装 VO（GET /{id}） */
     public InboundDetailVO getDetail(Long id) {
         Inbound head = getById(id);

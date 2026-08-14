@@ -77,7 +77,7 @@ public class InventoryCheckController {
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         InventoryCheck existed = inventoryCheckService.getById(id);
-        inventoryCheckService.removeById(id);
+        inventoryCheckService.deleteWithItems(id);
         operationLogService.record("check", "DELETE", id, existed != null ? existed.getCheckNo() : null, null, null);
         return Result.ok();
     }

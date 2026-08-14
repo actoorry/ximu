@@ -116,6 +116,18 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
         }
     }
 
+    /**
+     * 级联删除：先删明细，再删头（同事务）。
+     */
+    @Transactional
+    public void deleteWithItems(Long id) {
+        if (id == null) {
+            return;
+        }
+        outboundItemMapper.delete(new LambdaQueryWrapper<OutboundItem>().eq(OutboundItem::getOutboundId, id));
+        removeById(id);
+    }
+
     /** 查询头 + 明细，组装 VO（GET /{id}） */
     public OutboundDetailVO getDetail(Long id) {
         Outbound head = getById(id);

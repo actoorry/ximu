@@ -130,6 +130,18 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         }
     }
 
+    /**
+     * 级联删除：先删明细，再删头（同事务）。
+     */
+    @Transactional
+    public void deleteWithItems(Long id) {
+        if (id == null) {
+            return;
+        }
+        checkItemMapper.delete(new LambdaQueryWrapper<CheckItem>().eq(CheckItem::getCheckId, id));
+        removeById(id);
+    }
+
     /** 查询头 + 明细，组装 VO（GET /{id}） */
     public CheckDetailVO getDetail(Long id) {
         InventoryCheck head = getById(id);

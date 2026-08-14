@@ -126,6 +126,18 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
         updateById(transfer);
     }
 
+    /**
+     * 级联删除：先删明细，再删头（同事务）。
+     */
+    @Transactional
+    public void deleteWithItems(Long id) {
+        if (id == null) {
+            return;
+        }
+        transferItemMapper.delete(new LambdaQueryWrapper<TransferItem>().eq(TransferItem::getTransferId, id));
+        removeById(id);
+    }
+
     /** 查询头 + 明细，组装 VO（GET /{id}） */
     public TransferDetailVO getDetail(Long id) {
         Transfer head = getById(id);

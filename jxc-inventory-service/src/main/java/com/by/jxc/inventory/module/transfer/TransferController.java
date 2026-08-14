@@ -77,7 +77,7 @@ public class TransferController {
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         Transfer existed = transferService.getById(id);
-        transferService.removeById(id);
+        transferService.deleteWithItems(id);
         operationLogService.record("transfer", "DELETE", id, existed != null ? existed.getTransferNo() : null, null, null);
         return Result.ok();
     }
