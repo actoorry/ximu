@@ -5,16 +5,16 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.by</groupId>
-    <artifactId>jxc</artifactId>
+    <artifactId>ximu</artifactId>
     <version>1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
-    <name>jxc</name>
-    <description>jxc 进销存管理系统 - 库存模块微服务</description>
+    <name>ximu</name>
+    <description>ximu 进销存管理系统 - 库存模块微服务</description>
 
     <modules>
-        <module>jxc-common</module>
-        <module>jxc-inventory-service</module>
-        <module>jxc-safe-stock-service</module>
+        <module>ximu-common</module>
+        <module>ximu-inventory-service</module>
+        <module>ximu-safe-stock-service</module>
     </modules>
 
     <properties>
@@ -55,7 +55,7 @@
             <!-- 内部公共模块 -->
             <dependency>
                 <groupId>com.by</groupId>
-                <artifactId>jxc-common</artifactId>
+                <artifactId>ximu-common</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

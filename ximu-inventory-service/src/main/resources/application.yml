@@ -1,0 +1,45 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: ximu-inventory-service
+  datasource:
+    url: jdbc:mysql://localhost:3306/ximu?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8
+    username: "${DB_USERNAME:root}"
+    password: "${DB_PASSWORD:123456}"
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  sql:
+    init:
+      # 开发环境可改为 always 自动建表+种子数据；生产环境必须 never（用 Flyway/Liquibase 或手动管理 DDL）
+      mode: never
+      encoding: UTF-8
+
+# 跨域允许的前端来源（逗号分隔），生产环境按需收紧
+app:
+  cors:
+    allowed-origins: "http://localhost:5173,http://localhost:3000"
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+
+# 仅暴露健康检查与信息端点，避免泄露内部细节
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.by.ximu: info
