@@ -14,6 +14,8 @@ import java.util.Set;
 /**
  * 入库 Controller。
  *
+ * <p>create 接收「头 + items」请求体，返回 DetailVO（头 + items + totalQty）；
+ * get/list 同样返回头 + items/totalQty。
  * <p>流转字段集合：{@code id / status / action / auditLevel / checker / operator}；
  * PUT /{id} 当 body 含 action 时走状态机流转，否则走普通编辑。
  */
@@ -32,22 +34,20 @@ public class InboundController {
     @GetMapping
     public Result<Map<String, Object>> list(PageQuery pageQuery,
                                             @RequestParam(required = false) String status,
-                                            @RequestParam(required = false) String inboundType,
-                                            @RequestParam(required = false) String productName) {
-        return Result.ok(inboundService.page(pageQuery, status, inboundType, productName));
+                                            @RequestParam(required = false) String inboundType) {
+        return Result.ok(inboundService.page(pageQuery, status, inboundType));
     }
 
     @GetMapping("/{id}")
-    public Result<Inbound> get(@PathVariable Long id) {
-        return Result.ok(inboundService.getById(id));
+    public Result<InboundDetailVO> get(@PathVariable Long id) {
+        return Result.ok(inboundService.getDetail(id));
     }
 
     @PostMapping
-    public Result<Inbound> create(@Valid @RequestBody Inbound entity) {
-        entity.setStatus("CREATED"); // 强制初始状态，防越权
-        inboundService.save(entity);
-        operationLogService.record("inbound", "CREATE", entity.getId(), entity.getInboundNo(), null, entity);
-        return Result.ok(entity);
+    public Result<InboundDetailVO> create(@Valid @RequestBody InboundCreateRequest req) {
+        InboundDetailVO vo = inboundService.create(req);
+        operationLogService.record("inbound", "CREATE", vo.getId(), vo.getInboundNo(), null, req);
+        return Result.ok(vo);
     }
 
     /**

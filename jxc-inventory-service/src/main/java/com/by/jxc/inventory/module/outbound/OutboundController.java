@@ -14,6 +14,8 @@ import java.util.Set;
 /**
  * 出库 Controller。
  *
+ * <p>create 接收「头 + items」请求体，返回 DetailVO（头 + items + totalQty）；
+ * get/list 同样返回头 + items/totalQty。
  * <p>流转字段集合：{@code id / status / action / operator}；
  * PUT /{id} 当 body 含 action 时走状态机流转，否则走普通编辑。
  */
@@ -30,22 +32,20 @@ public class OutboundController {
 
     @GetMapping
     public Result<Map<String, Object>> list(PageQuery pageQuery,
-                                            @RequestParam(required = false) String status,
-                                            @RequestParam(required = false) String productName) {
-        return Result.ok(outboundService.page(pageQuery, status, productName));
+                                            @RequestParam(required = false) String status) {
+        return Result.ok(outboundService.page(pageQuery, status));
     }
 
     @GetMapping("/{id}")
-    public Result<Outbound> get(@PathVariable Long id) {
-        return Result.ok(outboundService.getById(id));
+    public Result<OutboundDetailVO> get(@PathVariable Long id) {
+        return Result.ok(outboundService.getDetail(id));
     }
 
     @PostMapping
-    public Result<Outbound> create(@Valid @RequestBody Outbound entity) {
-        entity.setStatus("CREATED"); // 强制初始状态，防越权
-        outboundService.save(entity);
-        operationLogService.record("outbound", "CREATE", entity.getId(), entity.getOutboundNo(), null, entity);
-        return Result.ok(entity);
+    public Result<OutboundDetailVO> create(@Valid @RequestBody OutboundCreateRequest req) {
+        OutboundDetailVO vo = outboundService.create(req);
+        operationLogService.record("outbound", "CREATE", vo.getId(), vo.getOutboundNo(), null, req);
+        return Result.ok(vo);
     }
 
     @PutMapping("/{id}")

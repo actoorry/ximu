@@ -8,12 +8,12 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * 出库管理实体。
+ * 出库管理实体（单据头）。
  *
+ * <p>商品行已下沉到 {@link OutboundItem} 明细表，一张出库单可含多行明细。
  * <p>状态机：CREATED → APPROVED
  */
 @Data
@@ -27,10 +27,6 @@ public class Outbound {
     private String outboundNo;
 
     private String saleOrderNo;
-
-    private String productName;
-
-    private BigDecimal qty;
 
     /** 博宇承担 / 对方承担 */
     private String freightBearer;

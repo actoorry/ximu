@@ -14,6 +14,8 @@ import java.util.Set;
 /**
  * 调拨 Controller。
  *
+ * <p>create 接收「头 + items」请求体，返回 DetailVO（头 + items + totalQty）；
+ * get/list 同样返回头 + items/totalQty。
  * <p>流转字段集合：{@code id / status / action / operator}；
  * PUT /{id} 当 body 含 action 时走状态机流转（approve/complete），否则走普通编辑。
  */
@@ -31,21 +33,20 @@ public class TransferController {
     @GetMapping
     public Result<Map<String, Object>> list(PageQuery pageQuery,
                                             @RequestParam(required = false) String status,
-                                            @RequestParam(required = false) String targetLocation) {
-        return Result.ok(transferService.page(pageQuery, status, targetLocation));
+                                            @RequestParam(required = false) String batchNo) {
+        return Result.ok(transferService.page(pageQuery, status, batchNo));
     }
 
     @GetMapping("/{id}")
-    public Result<Transfer> get(@PathVariable Long id) {
-        return Result.ok(transferService.getById(id));
+    public Result<TransferDetailVO> get(@PathVariable Long id) {
+        return Result.ok(transferService.getDetail(id));
     }
 
     @PostMapping
-    public Result<Transfer> create(@Valid @RequestBody Transfer entity) {
-        entity.setStatus("CREATED"); // 强制初始状态，防越权
-        transferService.save(entity);
-        operationLogService.record("transfer", "CREATE", entity.getId(), entity.getTransferNo(), null, entity);
-        return Result.ok(entity);
+    public Result<TransferDetailVO> create(@Valid @RequestBody TransferCreateRequest req) {
+        TransferDetailVO vo = transferService.create(req);
+        operationLogService.record("transfer", "CREATE", vo.getId(), vo.getTransferNo(), null, req);
+        return Result.ok(vo);
     }
 
     @PutMapping("/{id}")

@@ -8,12 +8,12 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * 盘点实体（表名 inventory_check，类名避开 Java 通用词 check）。
+ * 盘点实体（表名 inventory_check，类名避开 Java 通用词 check；单据头）。
  *
+ * <p>商品行已下沉到 {@link CheckItem} 明细表，一张盘点单可含多行明细。
  * <p>状态机：CREATED → APPROVED → CHECKED
  */
 @Data
@@ -27,8 +27,6 @@ public class InventoryCheck {
     private String checkNo;
 
     private String batchNo;
-
-    private BigDecimal actualQty;
 
     /** CREATED / APPROVED / CHECKED */
     private String status;

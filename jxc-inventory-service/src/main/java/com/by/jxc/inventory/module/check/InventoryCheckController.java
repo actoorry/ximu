@@ -14,6 +14,8 @@ import java.util.Set;
 /**
  * 盘点 Controller。
  *
+ * <p>create 接收「头 + items」请求体，返回 DetailVO（头 + items + totalQty）；
+ * get/list 同样返回头 + items/totalQty。
  * <p>流转字段集合：{@code id / status / action / operator}；
  * PUT /{id} 当 body 含 action 时走状态机流转（approve/check），否则走普通编辑。
  */
@@ -36,16 +38,15 @@ public class InventoryCheckController {
     }
 
     @GetMapping("/{id}")
-    public Result<InventoryCheck> get(@PathVariable Long id) {
-        return Result.ok(inventoryCheckService.getById(id));
+    public Result<CheckDetailVO> get(@PathVariable Long id) {
+        return Result.ok(inventoryCheckService.getDetail(id));
     }
 
     @PostMapping
-    public Result<InventoryCheck> create(@Valid @RequestBody InventoryCheck entity) {
-        entity.setStatus("CREATED"); // 强制初始状态，防越权
-        inventoryCheckService.save(entity);
-        operationLogService.record("check", "CREATE", entity.getId(), entity.getCheckNo(), null, entity);
-        return Result.ok(entity);
+    public Result<CheckDetailVO> create(@Valid @RequestBody CheckCreateRequest req) {
+        CheckDetailVO vo = inventoryCheckService.create(req);
+        operationLogService.record("check", "CREATE", vo.getId(), vo.getCheckNo(), null, req);
+        return Result.ok(vo);
     }
 
     @PutMapping("/{id}")

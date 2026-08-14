@@ -1,35 +1,42 @@
-package com.by.jxc.inventory.module.transfer;
+package com.by.jxc.inventory.module.check;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import com.fasterxml.jackson.annotation.JsonFormat;
-import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * 调拨实体（单据头）。
- *
- * <p>商品行已下沉到 {@link TransferItem} 明细表，一张调拨单可含多行明细。
- * <p>状态机：CREATED → APPROVED → COMPLETED
+ * 盘点明细实体（表名 check_item，头表 inventory_check 的多行商品明细）。
  */
 @Data
-@TableName("inventory_transfer")
-public class Transfer {
+@TableName("check_item")
+public class CheckItem {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    @NotBlank(message = "调拨单号不能为空")
-    private String transferNo;
+    /** 盘点单头ID */
+    private Long checkId;
 
-    private String batchNo;
+    /** 品名 */
+    private String productName;
 
-    /** CREATED / APPROVED / COMPLETED */
-    private String status;
+    /** 物料/材质 */
+    private String material;
+
+    /** 规格 */
+    private String spec;
+
+    /** 账面数量 */
+    private BigDecimal bookQty;
+
+    /** 实盘数量 */
+    private BigDecimal actualQty;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime createdAt;

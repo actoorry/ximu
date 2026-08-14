@@ -5,39 +5,38 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import com.fasterxml.jackson.annotation.JsonFormat;
-import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * 入库管理实体（单据头）。
- *
- * <p>商品行已下沉到 {@link InboundItem} 明细表，一张入库单可含多行明细。
- * <p>状态机：CREATED → APPROVED → CHECKED
+ * 入库明细实体（头表 inventory_inbound 的多行商品明细，一张入库单可含多行）。
  */
 @Data
-@TableName("inventory_inbound")
-public class Inbound {
+@TableName("inbound_item")
+public class InboundItem {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    @NotBlank(message = "入库单号不能为空")
-    private String inboundNo;
+    /** 入库单头ID */
+    private Long inboundId;
 
-    /** 估价 / 代销 / 内部 */
-    private String inboundType;
+    /** 品名 */
+    private String productName;
 
-    private String sourceOrderNo;
+    /** 物料/材质 */
+    private String material;
 
-    /** CREATED / APPROVED / CHECKED */
-    private String status;
+    /** 规格 */
+    private String spec;
 
-    private String checker;
+    /** 数量 */
+    private BigDecimal qty;
 
-    /** 直接审核 / 总监审核 / 经理审核 */
-    private String auditLevel;
+    /** 账面结算数量 */
+    private BigDecimal settleQty;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime createdAt;
