@@ -4,6 +4,7 @@ import com.by.jxc.common.PageQuery;
 import com.by.jxc.common.Result;
 import com.by.jxc.inventory.module.log.OperationLogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -40,7 +41,7 @@ public class OutboundController {
     }
 
     @PostMapping
-    public Result<Outbound> create(@RequestBody Outbound entity) {
+    public Result<Outbound> create(@Valid @RequestBody Outbound entity) {
         entity.setStatus("CREATED"); // 强制初始状态，防越权
         outboundService.save(entity);
         operationLogService.record("outbound", "CREATE", entity.getId(), entity.getOutboundNo(), null, entity);

@@ -4,6 +4,7 @@ import com.by.jxc.common.PageQuery;
 import com.by.jxc.common.Result;
 import com.by.jxc.inventory.module.log.OperationLogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -40,7 +41,7 @@ public class InventoryCheckController {
     }
 
     @PostMapping
-    public Result<InventoryCheck> create(@RequestBody InventoryCheck entity) {
+    public Result<InventoryCheck> create(@Valid @RequestBody InventoryCheck entity) {
         entity.setStatus("CREATED"); // 强制初始状态，防越权
         inventoryCheckService.save(entity);
         operationLogService.record("check", "CREATE", entity.getId(), entity.getCheckNo(), null, entity);

@@ -2,6 +2,7 @@ package com.by.jxc.safestock.module.safestock;
 
 import com.by.jxc.common.PageQuery;
 import com.by.jxc.common.Result;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -31,7 +32,7 @@ public class SafeStockController {
     }
 
     @PostMapping
-    public Result<SafeStock> create(@RequestBody SafeStock entity) {
+    public Result<SafeStock> create(@Valid @RequestBody SafeStock entity) {
         safeStockService.save(entity);
         operationLogService.record("safe-stock", "CREATE", entity.getId(), entity.getProductName(), null, entity);
         return Result.ok(entity);

@@ -1,7 +1,8 @@
 -- ============================================================
--- safe-stock-service schema：1 张表 + 种子数据
+-- safe-stock-service schema：1 张表 + 种子数据（DDL 参考文档）
 -- 幂等：CREATE TABLE IF NOT EXISTS + 先 DELETE 业务键再 INSERT
--- 每次启动（spring.sql.init.mode=always）可安全重复执行
+-- 注意：spring.sql.init.mode 默认 never，本文件不会自动执行；
+--       开发环境可临时改为 always 自动建表+种子，生产环境必须用 Flyway/Liquibase 或手动管理 DDL。
 -- ============================================================
 
 -- 安全库存配置
@@ -17,6 +18,7 @@ CREATE TABLE IF NOT EXISTS inventory_safe_stock (
     order_point_qty DECIMAL(18,4) DEFAULT NULL,
     max_qty DECIMAL(18,4) DEFAULT NULL,
     safe_stock DECIMAL(18,4) DEFAULT NULL,
+    version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id)

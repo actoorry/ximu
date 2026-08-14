@@ -4,6 +4,7 @@ import com.by.jxc.common.PageQuery;
 import com.by.jxc.common.Result;
 import com.by.jxc.inventory.module.log.OperationLogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -40,7 +41,7 @@ public class TransferController {
     }
 
     @PostMapping
-    public Result<Transfer> create(@RequestBody Transfer entity) {
+    public Result<Transfer> create(@Valid @RequestBody Transfer entity) {
         entity.setStatus("CREATED"); // 强制初始状态，防越权
         transferService.save(entity);
         operationLogService.record("transfer", "CREATE", entity.getId(), entity.getTransferNo(), null, entity);

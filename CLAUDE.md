@@ -10,7 +10,7 @@ jxc（进销存管理系统）库存模块：入库/出库/盘点/调拨/安全�
 | **inventory-service** | 8081 | jxc | 入库/出库/盘点/调拨/实时库存/批号管理（操作同一个库存账本，强一致性） |
 | **safe-stock-service** | 8082 | jxc | 安全库存配置/阈值管理/补货策略（不碰流水，只读库存做预警） |
 
-## 技术栈（JDK 17，不是 21）
+## 技术栈（JDK 17）
 
 | 组件 | 版型 |
 |------|------|
@@ -33,14 +33,25 @@ $env:Path = "$env:JAVA_HOME\bin;$env:MAVEN_HOME\bin;$env:Path"
 - **唯一正式构建命令**：在 jxc 根目录 `mvn clean compile -DskipTests`（组长执行，Claude 不要跑 mvn/npm）
 - 禁止 Docker 容器（MySQL/Redis 除外）
 - 构建产物（target/）不提交 git
+- **DDL/种子数据**：`spring.sql.init.mode` 默认为 `never`，schema.sql 不会随启动自动执行；开发环境可临时改为 `always` 自动建表+种子，生产环境必须用 Flyway/Liquibase 或手动管理 DDL
 
 ## 禁止事项
 
 - **禁止使用虚拟线程**（JDK 21 特性，本项目 JDK 17）：application.yml 中不要写 `spring.threads.virtual.enabled`
-- **禁止引入 Spring Security**（本阶段无需认证，纯 CRUD + 状态机）
-- **禁止引入 Redis**
 - **禁止跑 mvn/npm build**（组长统一编译验证）
 - **禁止 git commit**（组长统一提交）
+- **认证不在本模块实现**：本模块不含 Spring Security，统一由网关 / 父应用处理；保持模块可移植，不绑定特定认证方案
+- **不引入 Redis 等中间件**：如后续需要缓存 / 限流，由网关层统一接入
+
+## 生产部署须知
+
+- **数据库凭据**：账号密码通过环境变量注入 `DB_USERNAME` / `DB_PASSWORD`，本地开发默认 `root` / `123456`（见各 `application.yml` 的 `${DB_USERNAME:root}` / `${DB_PASSWORD:123456}`）。生产严禁使用默认值，务必设置环境变量。
+- **CORS**：允许的前端来源通过 `app.cors.allowed-origins`（逗号分隔）配置，默认仅 `localhost:5173/3000`；生产按实际域名收紧，不要回退为 `*`。
+- **认证**：本模块不内置 Spring Security，认证与鉴权由上游网关 / 父应用统一处理后再路由到本服务。
+- **DDL 管理**：`spring.sql.init.mode` 生产保持 `never`，schema 变更走 Flyway/Liquibase 或人工 DBA 流程。
+- **健康检查**：已引入 Spring Boot Actuator，仅暴露 `/actuator/health` 与 `/actuator/info`（见 `management.endpoints.web.exposure.include`）。
+- **连接池**：HikariCP 参数已在 `application.yml` 配置（`maximum-pool-size` 等），按生产负载调整。
+- **乐观锁**：所有业务表含 `version` 列，状态机流转（approve/check/complete）依赖 MyBatis-Plus `@Version` + `OptimisticLockerInnerInterceptor` 防止并发覆盖。
 
 ## 前后端分离 API 契约
 

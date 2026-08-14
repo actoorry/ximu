@@ -3,6 +3,7 @@ package com.by.jxc.inventory.module.batch;
 import com.by.jxc.common.PageQuery;
 import com.by.jxc.common.Result;
 import com.by.jxc.inventory.module.log.OperationLogService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -32,7 +33,7 @@ public class BatchController {
     }
 
     @PostMapping
-    public Result<Batch> create(@RequestBody Batch entity) {
+    public Result<Batch> create(@Valid @RequestBody Batch entity) {
         batchService.save(entity);
         operationLogService.record("batch", "CREATE", entity.getId(), entity.getBatchNo(), null, entity);
         return Result.ok(entity);

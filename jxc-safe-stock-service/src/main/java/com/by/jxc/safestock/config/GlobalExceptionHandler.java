@@ -38,9 +38,10 @@ public class GlobalExceptionHandler {
         return Result.error(400, msg);
     }
 
+    /** 兜底异常：detail 只进日志，不返前端，避免泄露内部信息 */
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception e) {
         log.error("系统异常", e);
-        return Result.error(500, "服务器内部错误：" + e.getMessage());
+        return Result.error(500, "服务器内部错误，请联系管理员");
     }
 }

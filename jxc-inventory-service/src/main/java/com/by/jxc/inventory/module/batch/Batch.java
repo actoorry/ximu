@@ -3,7 +3,9 @@ package com.by.jxc.inventory.module.batch;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.fasterxml.jackson.annotation.JsonFormat;
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 import java.time.LocalDate;
@@ -19,6 +21,7 @@ public class Batch {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    @NotBlank(message = "批号不能为空")
     private String batchNo;
 
     private String productName;
@@ -35,4 +38,8 @@ public class Batch {
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime updatedAt;
+
+    /** 乐观锁版本号 */
+    @Version
+    private Integer version;
 }

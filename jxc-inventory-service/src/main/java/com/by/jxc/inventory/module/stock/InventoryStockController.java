@@ -3,6 +3,7 @@ package com.by.jxc.inventory.module.stock;
 import com.by.jxc.common.PageQuery;
 import com.by.jxc.common.Result;
 import com.by.jxc.inventory.module.log.OperationLogService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -42,7 +43,7 @@ public class InventoryStockController {
     }
 
     @PostMapping
-    public Result<InventoryStock> create(@RequestBody InventoryStock entity) {
+    public Result<InventoryStock> create(@Valid @RequestBody InventoryStock entity) {
         inventoryStockService.save(entity);
         operationLogService.record("stock", "CREATE", entity.getId(), entity.getProductName(), null, entity);
         return Result.ok(entity);

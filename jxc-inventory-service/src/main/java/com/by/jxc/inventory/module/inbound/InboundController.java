@@ -4,6 +4,7 @@ import com.by.jxc.common.PageQuery;
 import com.by.jxc.common.Result;
 import com.by.jxc.inventory.module.log.OperationLogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -42,7 +43,7 @@ public class InboundController {
     }
 
     @PostMapping
-    public Result<Inbound> create(@RequestBody Inbound entity) {
+    public Result<Inbound> create(@Valid @RequestBody Inbound entity) {
         entity.setStatus("CREATED"); // 强制初始状态，防越权
         inboundService.save(entity);
         operationLogService.record("inbound", "CREATE", entity.getId(), entity.getInboundNo(), null, entity);

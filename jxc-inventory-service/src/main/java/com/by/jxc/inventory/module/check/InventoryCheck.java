@@ -3,7 +3,9 @@ package com.by.jxc.inventory.module.check;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.fasterxml.jackson.annotation.JsonFormat;
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -21,6 +23,7 @@ public class InventoryCheck {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    @NotBlank(message = "盘点单号不能为空")
     private String checkNo;
 
     private String batchNo;
@@ -35,4 +38,8 @@ public class InventoryCheck {
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime updatedAt;
+
+    /** 乐观锁版本号 */
+    @Version
+    private Integer version;
 }
