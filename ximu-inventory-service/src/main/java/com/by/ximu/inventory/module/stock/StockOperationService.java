@@ -51,7 +51,9 @@ public class StockOperationService {
         } else {
             BigDecimal now = stock.getActualQty() == null ? BigDecimal.ZERO : stock.getActualQty();
             stock.setActualQty(now.add(qty));
-            inventoryStockMapper.updateById(stock); // @Version 乐观锁
+            if (inventoryStockMapper.updateById(stock) == 0) {
+                throw new IllegalStateException("库存并发冲突，请重试（入库）");
+            }
         }
         return stock;
     }
@@ -80,7 +82,11 @@ public class StockOperationService {
                     + "，当前库存 " + available + "，需出库 " + qty);
         }
         stock.setActualQty(available.subtract(qty));
-        inventoryStockMapper.updateById(stock); // @Version 乐观锁
+        if (inventoryStockMapper.updateById(stock) == 0) {
+            // 并发场景：另一事务已修改本行（version 变化），本次扣减未生效；
+            // 抛异常使调用方事务（outbound.approve）整体回滚，避免「单据已流转但库存未扣」的超卖。
+            throw new IllegalStateException("库存并发冲突，请重试（出库）: " + productName);
+        }
         return stock;
     }
 
@@ -105,7 +111,9 @@ public class StockOperationService {
             inventoryStockMapper.insert(stock);
         } else {
             stock.setActualQty(actualQty);
-            inventoryStockMapper.updateById(stock); // @Version 乐观锁
+            if (inventoryStockMapper.updateById(stock) == 0) {
+                throw new IllegalStateException("库存并发冲突，请重试（盘点）");
+            }
         }
         return stock;
     }

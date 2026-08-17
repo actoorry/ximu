@@ -149,6 +149,12 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - **H 架构定位文档 ✅（波次3）**：ARCHITECTURE.md 155 行（定位声明/模块地图/可插拔点清单 5 项/部署形态/扩展指南 6 步/开源协作约定）+ README 架构定位小节；
   组长事实抽查通过：app.auth.enabled 头契约开关（yml+Filter @Value）、单测 79 条分布表、V1 冻结纪律均与实况一致
 
+### 并发不超卖修复（✅ 2026-08-17，组长执行，P2-10 核心）
+- 实证超卖 bug：JDBC 并发程序（真实 MySQL）复现——2 线程各扣 8、库存 10，乐观锁使第二个 updateById 返回 0 行，但 StockOperationService.decreaseStock 未检查返回值，导致冲突线程静默成功，两张出库单都 APPROVED、库存只扣一次（超卖）
+- 修复：increaseStock/decreaseStock/adjustStock 更新分支加 updateById(...) == 0 抛 IllegalStateException（库存并发冲突，请重试）；冲突单随调用方事务（outbound.approve）整体回滚
+- 验证：修复后并发程序 success=1 conflict=1、库存=2 不为负（冲突单抛异常回滚）；StockOperationServiceTest 21→24 例（新增 3 例乐观锁冲突抛异常），全量 82 测试全绿
+- 注意：Testcontainers 容器级并发压测仍依赖 Docker/CI（沙箱内 docker 不可见），本次为真实 MySQL 进程级并发验证 + 单测固化
+
 ### 首次启动冒烟（✅ 2026-08-17，组长执行）
 - **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
 - 接口冒烟全通过：health=UP；无身份头 → HTTP 401（RBAC 拦截）；带 ADMIN 头列表 → 200 + V1 种子数据；POST 建单 → `IN20260817001`（原子取号真机工作）+ 库存联动建行 + 库龄预警真实触发（电解铜 16 天>15 阈值 warn=true）

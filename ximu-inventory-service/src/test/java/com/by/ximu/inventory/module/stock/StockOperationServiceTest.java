@@ -84,6 +84,7 @@ class StockOperationServiceTest {
     void increase_命中既有行_累加实际库存() {
         InventoryStock existing = existingStock(new BigDecimal("5"));
         when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
+        when(inventoryStockMapper.updateById(existing)).thenReturn(1);
 
         InventoryStock result = stockOperationService.increaseStock(1L, "A级", "苹果", "大", new BigDecimal("3"));
 
@@ -97,6 +98,7 @@ class StockOperationServiceTest {
     void increase_既有行实际库存为null_按0累加() {
         InventoryStock existing = existingStock(null);
         when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
+        when(inventoryStockMapper.updateById(existing)).thenReturn(1);
 
         InventoryStock result = stockOperationService.increaseStock(1L, null, "苹果", null, new BigDecimal("3"));
 
@@ -169,6 +171,7 @@ class StockOperationServiceTest {
     void decrease_库存充足_正常扣减() {
         InventoryStock existing = existingStock(new BigDecimal("10"));
         when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
+        when(inventoryStockMapper.updateById(existing)).thenReturn(1);
 
         InventoryStock result = stockOperationService.decreaseStock(1L, null, "苹果", null, new BigDecimal("4"));
 
@@ -198,6 +201,7 @@ class StockOperationServiceTest {
     void adjust_命中既有行_校正到实盘值() {
         InventoryStock existing = existingStock(new BigDecimal("10"));
         when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
+        when(inventoryStockMapper.updateById(existing)).thenReturn(1);
 
         InventoryStock result = stockOperationService.adjustStock(1L, null, "苹果", null, new BigDecimal("3"));
 
@@ -259,5 +263,41 @@ class StockOperationServiceTest {
                 () -> stockOperationService.adjustStock(1L, null, "", null, new BigDecimal("1")));
         assertTrue(ex.getMessage().contains("品名"));
         verifyNoInteractions(inventoryStockMapper);
+    }
+
+    // ---------- 并发冲突（乐观锁 updateById 返回 false → 抛异常，防超卖） ----------
+
+    @Test
+    void increase_乐观锁冲突_抛异常() {
+        InventoryStock existing = existingStock(new BigDecimal("5"));
+        when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
+        when(inventoryStockMapper.updateById(existing)).thenReturn(0);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> stockOperationService.increaseStock(1L, null, "苹果", null, new BigDecimal("3")));
+        assertTrue(ex.getMessage().contains("并发冲突"));
+    }
+
+    @Test
+    void decrease_乐观锁冲突_抛异常防超卖() {
+        InventoryStock existing = existingStock(new BigDecimal("10"));
+        when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
+        when(inventoryStockMapper.updateById(existing)).thenReturn(0);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> stockOperationService.decreaseStock(1L, null, "苹果", null, new BigDecimal("8")));
+        assertTrue(ex.getMessage().contains("并发冲突"));
+        assertTrue(ex.getMessage().contains("出库"));
+    }
+
+    @Test
+    void adjust_乐观锁冲突_抛异常() {
+        InventoryStock existing = existingStock(new BigDecimal("10"));
+        when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
+        when(inventoryStockMapper.updateById(existing)).thenReturn(0);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> stockOperationService.adjustStock(1L, null, "苹果", null, new BigDecimal("3")));
+        assertTrue(ex.getMessage().contains("并发冲突"));
     }
 }
