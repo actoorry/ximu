@@ -39,10 +39,17 @@ public class BatchController {
     }
 
     @PostMapping
-    public Result<Batch> create(@Valid @RequestBody Batch entity) {
+    public Result<Batch> create(@Valid @RequestBody BatchCreateRequest req) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
+        // 白名单赋值：屏蔽 id/version/createdAt/updatedAt
+        Batch entity = new Batch();
+        entity.setBatchNo(req.getBatchNo());
+        entity.setProductName(req.getProductName());
+        entity.setCreateDate(req.getCreateDate());
+        entity.setCreator(req.getCreator());
+        entity.setRemark(req.getRemark());
         batchService.save(entity);
-        operationLogService.record("batch", "CREATE", entity.getId(), entity.getBatchNo(), OperatorContext.getOperatorName(), entity);
+        operationLogService.record("batch", "CREATE", entity.getId(), entity.getBatchNo(), OperatorContext.getOperatorName(), req);
         return Result.ok(entity);
     }
 

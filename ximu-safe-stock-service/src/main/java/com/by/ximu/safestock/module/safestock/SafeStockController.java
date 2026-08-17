@@ -37,10 +37,22 @@ public class SafeStockController {
     }
 
     @PostMapping
-    public Result<SafeStock> create(@Valid @RequestBody SafeStock entity) {
+    public Result<SafeStock> create(@Valid @RequestBody SafeStockCreateRequest req) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
+        // 白名单赋值：屏蔽 id/version/createdAt/updatedAt
+        SafeStock entity = new SafeStock();
+        entity.setProductName(req.getProductName());
+        entity.setMaterial(req.getMaterial());
+        entity.setOrgId(req.getOrgId());
+        entity.setServiceLevel(req.getServiceLevel());
+        entity.setZValue(req.getZValue());
+        entity.setReplenishCycle(req.getReplenishCycle());
+        entity.setEconomicQty(req.getEconomicQty());
+        entity.setOrderPointQty(req.getOrderPointQty());
+        entity.setMaxQty(req.getMaxQty());
+        entity.setSafeStock(req.getSafeStock());
         safeStockService.save(entity);
-        operationLogService.record("safe-stock", "CREATE", entity.getId(), entity.getProductName(), OperatorContext.getOperatorName(), entity);
+        operationLogService.record("safe-stock", "CREATE", entity.getId(), entity.getProductName(), OperatorContext.getOperatorName(), req);
         return Result.ok(entity);
     }
 

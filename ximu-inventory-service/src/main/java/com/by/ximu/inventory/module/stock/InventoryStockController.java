@@ -52,10 +52,20 @@ public class InventoryStockController {
     }
 
     @PostMapping
-    public Result<InventoryStock> create(@Valid @RequestBody InventoryStock entity) {
+    public Result<InventoryStock> create(@Valid @RequestBody InventoryStockCreateRequest req) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
+        // 白名单赋值：只建立库存维度行（orgId/品名/材质/规格/等级 + 预警配置）；
+        // 账本字段（actualQty/transitQty/firstInboundAt）由单据流转产生，不在此接收。
+        InventoryStock entity = new InventoryStock();
+        entity.setOrgId(req.getOrgId());
+        entity.setProductName(req.getProductName());
+        entity.setGrade(req.getGrade() == null ? "" : req.getGrade());
+        entity.setMaterial(req.getMaterial() == null ? "" : req.getMaterial());
+        entity.setSpec(req.getSpec() == null ? "" : req.getSpec());
+        entity.setStockAge(req.getStockAge());
+        entity.setAgeWarnDays(req.getAgeWarnDays());
         inventoryStockService.save(entity);
-        operationLogService.record("stock", "CREATE", entity.getId(), entity.getProductName(), OperatorContext.getOperatorName(), entity);
+        operationLogService.record("stock", "CREATE", entity.getId(), entity.getProductName(), OperatorContext.getOperatorName(), req);
         return Result.ok(entity);
     }
 

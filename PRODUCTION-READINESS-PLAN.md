@@ -211,6 +211,12 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 真机验证（独立库 ximu_init_test）：31 条语句执行成功，13 张表 + 种子完整（inbound 2/stock 4/safe_stock 3/batch 3/log 3）+ 五维唯一键 + CHECK 约束
 - 教训：验证脚本首版写死 USE ximu 误连 dev 库，因 dev 库旧 schema 首条 INSERT 即报错中断、零污染（已核实 12 表行数与种子一致）；已改为独立库验证 + 脚本加破坏性警告
 
+### 三个 create 接口白名单 DTO（✅ 2026-08-17，组长执行）
+- 库存/批号/安全库存的 create 原直接用实体 save，可传 id/version/createdAt/updatedAt/账本字段
+- 新增 3 个 CreateRequest DTO：InventoryStockCreateRequest（屏蔽 id/version/时间戳/firstInboundAt/actualQty/transitQty，仅收维度行字段）、BatchCreateRequest、SafeStockCreateRequest
+- 三个 Controller.create 改白名单赋值，与各自 update 白名单对齐
+- 验证：5 模块编译通过 + 全量 89 测试全绿
+
 ### 首次启动冒烟（✅ 2026-08-17，组长执行）
 - **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
 - 接口冒烟全通过：health=UP；无身份头 → HTTP 401（RBAC 拦截）；带 ADMIN 头列表 → 200 + V1 种子数据；POST 建单 → `IN20260817001`（原子取号真机工作）+ 库存联动建行 + 库龄预警真实触发（电解铜 16 天>15 阈值 warn=true）
