@@ -7,6 +7,7 @@ import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
 import com.by.ximu.inventory.module.log.OperationLogService;
 import jakarta.validation.Valid;
+import org.springframework.dao.DuplicateKeyException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -58,8 +59,12 @@ public class BatchController {
         existed.setCreateDate(entity.getCreateDate());
         existed.setCreator(entity.getCreator());
         existed.setRemark(entity.getRemark());
-        if (!batchService.updateById(existed)) {
-            throw new IllegalStateException("并发冲突，请刷新后重试");
+        try {
+            if (!batchService.updateById(existed)) {
+                throw new IllegalStateException("并发冲突，请刷新后重试");
+            }
+        } catch (DuplicateKeyException e) {
+            throw new IllegalArgumentException("批号已存在: " + entity.getBatchNo());
         }
         operationLogService.record("batch", "UPDATE", id, existed.getBatchNo(), OperatorContext.getOperatorName(), entity);
         return Result.ok();

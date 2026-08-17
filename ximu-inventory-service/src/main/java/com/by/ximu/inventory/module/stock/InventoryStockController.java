@@ -66,10 +66,15 @@ public class InventoryStockController {
         if (existed == null) {
             throw new IllegalArgumentException("库存记录不存在: " + id);
         }
-        // 白名单：库存账本字段（actualQty/transitQty/orgId/productName/spec/grade/firstInboundAt）只能由单据流转产生，禁止直接 PUT 修改；
+        // 白名单：库存账本字段（actualQty/transitQty/orgId/productName/material/spec/grade/firstInboundAt）只能由单据流转产生，禁止直接 PUT 修改；
         // 仅允许修改库龄预警相关配置（stockAge 遗留静态列、ageWarnDays 阈值）。
-        existed.setStockAge(entity.getStockAge());
-        existed.setAgeWarnDays(entity.getAgeWarnDays());
+        // 部分更新语义：字段为 null 表示保持原值（与单据 updateHead 一致），避免误清空预警阈值导致预警静默失效。
+        if (entity.getStockAge() != null) {
+            existed.setStockAge(entity.getStockAge());
+        }
+        if (entity.getAgeWarnDays() != null) {
+            existed.setAgeWarnDays(entity.getAgeWarnDays());
+        }
         if (!inventoryStockService.updateById(existed)) {
             throw new IllegalStateException("库存并发冲突，请刷新后重试");
         }

@@ -2,7 +2,9 @@
 -- Flyway V1 基线迁移（baseline full schema）
 --   1) 新库（无历史表）：直接执行本文件，一次性建全 7 张头表 + 4 张明细表 + doc_no_seq + 种子数据
 --   2) 存量库（已有表）：spring.flyway.baseline-on-migrate=true 先打 baseline 1，跳过本 V1，不重复执行
--- 内容 = 当前 src/main/resources/schema.sql 的完整拷贝（建表 + 种子 INSERT，逐字节一致）
+-- 内容 = 初始基线的完整建表 + 种子数据（当时的 schema.sql 拷贝）。
+-- 注意：V1 为冻结基线，后续变更（request_id / safe_stock 表 / 数量约束 / material 五维等）见 V2~V5；
+--       schema.sql 已演进（含上述增量），与 V1 不再逐字节一致。严禁修改已 apply 的 V1。
 -- ============================================================
 
 -- ============================================================

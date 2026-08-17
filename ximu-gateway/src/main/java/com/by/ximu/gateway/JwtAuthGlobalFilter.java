@@ -58,8 +58,8 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
             SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
             Claims claims = Jwts.parser().verifyWith(key).build()
                     .parseSignedClaims(token).getPayload();
-            // jjwt 0.12.x parseSignedClaims 默认只验签名不验 exp，必须显式校验过期时间
-            if (claims.getExpiration() != null && claims.getExpiration().before(new java.util.Date())) {
+            // 严格过期校验：exp 必须存在且未过期，否则拒绝（防签发方漏设 exp 导致 token 永久有效）
+            if (claims.getExpiration() == null || claims.getExpiration().before(new java.util.Date())) {
                 return unauthorized(exchange);
             }
 
