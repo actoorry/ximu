@@ -33,6 +33,7 @@ public class InventoryStockController {
     public Result<Map<String, Object>> list(PageQuery pageQuery,
                                             @RequestParam(required = false) String productName,
                                             @RequestParam(required = false) String grade) {
+        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         Map<String, Object> result = inventoryStockService.page(pageQuery, productName, grade);
         fillStockAgeDays(result);
         fillWarn(result);
@@ -41,6 +42,7 @@ public class InventoryStockController {
 
     @GetMapping("/{id}")
     public Result<InventoryStock> get(@PathVariable Long id) {
+        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         InventoryStock stock = inventoryStockService.getById(id);
         if (stock != null) {
             fillStockAgeDays(stock);
@@ -60,9 +62,18 @@ public class InventoryStockController {
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody InventoryStock entity) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
-        entity.setId(id);
-        inventoryStockService.updateById(entity);
-        operationLogService.record("stock", "UPDATE", id, entity.getProductName(), OperatorContext.getOperatorName(), entity);
+        InventoryStock existed = inventoryStockService.getById(id);
+        if (existed == null) {
+            throw new IllegalArgumentException("库存记录不存在: " + id);
+        }
+        // 白名单：库存账本字段（actualQty/transitQty/orgId/productName/spec/grade/firstInboundAt）只能由单据流转产生，禁止直接 PUT 修改；
+        // 仅允许修改库龄预警相关配置（stockAge 遗留静态列、ageWarnDays 阈值）。
+        existed.setStockAge(entity.getStockAge());
+        existed.setAgeWarnDays(entity.getAgeWarnDays());
+        if (!inventoryStockService.updateById(existed)) {
+            throw new IllegalStateException("库存并发冲突，请刷新后重试");
+        }
+        operationLogService.record("stock", "UPDATE", id, existed.getProductName(), OperatorContext.getOperatorName(), entity);
         return Result.ok();
     }
 
@@ -70,8 +81,16 @@ public class InventoryStockController {
     public Result<Void> delete(@PathVariable Long id) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
         InventoryStock existed = inventoryStockService.getById(id);
+        if (existed == null) {
+            throw new IllegalArgumentException("库存记录不存在: " + id);
+        }
+        // 业务约束：库存非 0（实际库存或在途）不可删除，避免删掉正在被单据引用的库存行
+        if ((existed.getActualQty() != null && existed.getActualQty().compareTo(java.math.BigDecimal.ZERO) != 0)
+                || (existed.getTransitQty() != null && existed.getTransitQty().compareTo(java.math.BigDecimal.ZERO) != 0)) {
+            throw new IllegalStateException("库存不为零，不可删除（请通过出库/调拨流转处理）");
+        }
         inventoryStockService.removeById(id);
-        operationLogService.record("stock", "DELETE", id, existed != null ? existed.getProductName() : null, OperatorContext.getOperatorName(), null);
+        operationLogService.record("stock", "DELETE", id, existed.getProductName(), OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 

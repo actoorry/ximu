@@ -1,7 +1,9 @@
 package com.by.ximu.inventory.module.outbound;
 
+import com.by.ximu.common.Auths;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
+import com.by.ximu.common.Role;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,11 +34,13 @@ public class OutboundController {
     @GetMapping
     public Result<Map<String, Object>> list(PageQuery pageQuery,
                                             @RequestParam(required = false) String status) {
+        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         return Result.ok(outboundService.page(pageQuery, status));
     }
 
     @GetMapping("/{id}")
     public Result<OutboundDetailVO> get(@PathVariable Long id) {
+        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         return Result.ok(outboundService.getDetail(id));
     }
 

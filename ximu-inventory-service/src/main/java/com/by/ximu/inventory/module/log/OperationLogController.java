@@ -1,7 +1,9 @@
 package com.by.ximu.inventory.module.log;
 
+import com.by.ximu.common.Auths;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
+import com.by.ximu.common.Role;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,6 +27,7 @@ public class OperationLogController {
                                             @RequestParam(required = false) String module,
                                             @RequestParam(required = false) String operation,
                                             @RequestParam(required = false) Long targetId) {
+        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         return Result.ok(operationLogService.page(pageQuery, module, operation, targetId));
     }
 }

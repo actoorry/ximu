@@ -19,7 +19,7 @@ ximu 是一个**模块化、可插拔的开源进销存系统**，聚焦库存�
 | `ximu-common` | —（共享库） | 可复用 RBAC 基座：`Role`（5 内置角色）、`Auths`（角色校验 + 职责分离）、`OperatorContext`（ThreadLocal 操作人上下文）、`Operator`、`ForbiddenException`（→403）、`Result`、`PageQuery` | 被各服务依赖、随服务打包，不独立部署 |
 | `ximu-gateway` | 8080 | 认证边缘：校验 JWT → 剥离伪造头 → 注入 `X-User-*` 身份头 → 路由转发 → 全局 CORS | 可替换（任意 JWT/SSO 实现）、可旁路（dev 直连服务） |
 | `ximu-inventory-service` | 8081 | 库存账本核心：入库/出库/盘点/调拨/实时库存/批号/操作日志，写同一库存账本 | 独占 `ximu` 库的 Flyway 迁移权 |
-| `ximu-safe-stock-service` | 8082 | 预警策略：安全库存/阈值/补货参数（有货率、Z 值、补货周期、经济补货量、订货点、最大库存、安全库存）的配置维护 | 可选装，停用不影响账本 |
+| `ximu-safe-stock-service` | 8082 | 安全库存参数配置维护（有货率、Z 值、补货周期、经济补货量、订货点、最大库存、安全库存，仅 CRUD，不做预警计算） | 可选装，停用不影响账本 |
 
 > 四个模块共享同一个 MySQL 库 `ximu`。账本（`inventory_stock` 及四张单据明细）只由 inventory-service 写入；safe-stock 仅维护自身 `inventory_safe_stock` 配置表，不写库存账本。库龄预警判定（`InventoryStock.isWarn`）在 inventory-service 内实现。
 
@@ -108,7 +108,7 @@ public static boolean isWarn(Long stockAgeDays, Integer stockAge, Integer ageWar
 
 - **4 个 artifact，3 个可独立部署**：根 `pom.xml` 4 个模块产出 4 个构建产物——3 个可执行 Spring Boot jar（inventory-service / safe-stock-service / gateway）+ 1 个共享库 `ximu-common`（打进各服务，不单独部署）。
 - **独立启停伸缩**：三服务各占独立端口（8081 / 8082 / 8080）、独立进程、独立 `application.yml`，可分别启停与水平扩容；inventory 与 safe-stock 之间无运行时调用依赖（共享 DB 而非互相调用）。
-- **safe-stock 可整体下线**：它是账本的“旁路”，停用后入库 / 出库 / 盘点 / 调拨 / 实时库存照常运行，仅失去安全库存配置与补货参数能力。
+- **safe-stock 可整体下线**：它是账本的“旁路”，停用后入库 / 出库 / 盘点 / 调拨 / 实时库存照常运行，仅失去安全库存参数的配置维护能力。
 - **启动顺序**：先起两个业务服务，再起网关（网关 uri 直连 8081/8082）；生产须把 8081/8082 网络隔离在网关之后，禁止客户端绕过网关直连（否则可伪造 `X-User-*` 头）。
 
 ## 五、扩展指南：如何新增一个业务模块

@@ -12,7 +12,7 @@
 
     <artifactId>ximu-safe-stock-service</artifactId>
     <name>ximu-safe-stock-service</name>
-    <description>安全库存微服务：安全库存配置 / 阈值管理 / 补货策略（端口 8082，只读库存做预警）</description>
+    <description>安全库存配置微服务：安全库存参数（有货率/Z值/补货周期/订货点/最高库存/安全库存）的配置维护（端口 8082）</description>
 
     <dependencies>
         <dependency>

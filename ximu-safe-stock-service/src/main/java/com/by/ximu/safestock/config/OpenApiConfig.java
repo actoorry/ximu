@@ -24,7 +24,7 @@ public class OpenApiConfig {
         return new OpenAPI()
                 .info(new Info()
                         .title("ximu 安全库存服务 API")
-                        .description("安全库存配置 / 阈值管理 / 补货策略（有货率、Z 值、补货周期、经济补货量、订货点、最大库存、安全库存）。"
+                        .description("安全库存参数配置维护（有货率、Z 值、补货周期、经济补货量、订货点、最大库存、安全库存）。本期仅配置 CRUD，不做预警计算。"
 
                                 + "鉴权说明：直接访问需携带网关注入的身份头（见 Authorize），或经网关（8080）。")
                         .version("1.0.0"))

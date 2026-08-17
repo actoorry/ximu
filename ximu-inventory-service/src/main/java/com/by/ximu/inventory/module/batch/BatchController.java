@@ -27,11 +27,13 @@ public class BatchController {
     public Result<Map<String, Object>> list(PageQuery pageQuery,
                                             @RequestParam(required = false) String productName,
                                             @RequestParam(required = false) String batchNo) {
+        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         return Result.ok(batchService.page(pageQuery, productName, batchNo));
     }
 
     @GetMapping("/{id}")
     public Result<Batch> get(@PathVariable Long id) {
+        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         return Result.ok(batchService.getById(id));
     }
 
@@ -46,9 +48,20 @@ public class BatchController {
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Batch entity) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
-        entity.setId(id);
-        batchService.updateById(entity);
-        operationLogService.record("batch", "UPDATE", id, entity.getBatchNo(), OperatorContext.getOperatorName(), entity);
+        Batch existed = batchService.getById(id);
+        if (existed == null) {
+            throw new IllegalArgumentException("批号不存在: " + id);
+        }
+        // 白名单：只允许改描述性字段，id/version/createdAt/updatedAt 不可经此修改
+        existed.setBatchNo(entity.getBatchNo());
+        existed.setProductName(entity.getProductName());
+        existed.setCreateDate(entity.getCreateDate());
+        existed.setCreator(entity.getCreator());
+        existed.setRemark(entity.getRemark());
+        if (!batchService.updateById(existed)) {
+            throw new IllegalStateException("并发冲突，请刷新后重试");
+        }
+        operationLogService.record("batch", "UPDATE", id, existed.getBatchNo(), OperatorContext.getOperatorName(), entity);
         return Result.ok();
     }
 
@@ -56,8 +69,11 @@ public class BatchController {
     public Result<Void> delete(@PathVariable Long id) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
         Batch existed = batchService.getById(id);
+        if (existed == null) {
+            throw new IllegalArgumentException("批号不存在: " + id);
+        }
         batchService.removeById(id);
-        operationLogService.record("batch", "DELETE", id, existed != null ? existed.getBatchNo() : null, OperatorContext.getOperatorName(), null);
+        operationLogService.record("batch", "DELETE", id, existed.getBatchNo(), OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 }

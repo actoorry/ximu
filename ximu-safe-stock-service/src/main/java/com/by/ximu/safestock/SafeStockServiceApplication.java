@@ -7,7 +7,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * 安全库存微服务启动类（端口 8082）。
  *
- * <p>不碰库存流水，只读库存做预警；负责安全库存配置 / 阈值管理 / 补货策略。
+ * <p>负责安全库存参数（有货率/Z值/补货周期/订货点/最高库存/安全库存）的配置维护。
+ * <p>注：本期仅提供配置的 CRUD，不做库存预警计算与补货建议（预警/补货能力已从范围砍掉，配置字段保留供后续或外部工具使用）。
  */
 @SpringBootApplication
 @MapperScan("com.by.ximu.safestock.module.safestock")

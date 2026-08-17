@@ -1,7 +1,9 @@
 package com.by.ximu.inventory.module.check;
 
+import com.by.ximu.common.Auths;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
+import com.by.ximu.common.Role;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,11 +34,13 @@ public class InventoryCheckController {
     public Result<Map<String, Object>> list(PageQuery pageQuery,
                                             @RequestParam(required = false) String status,
                                             @RequestParam(required = false) String batchNo) {
+        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         return Result.ok(inventoryCheckService.page(pageQuery, status, batchNo));
     }
 
     @GetMapping("/{id}")
     public Result<CheckDetailVO> get(@PathVariable Long id) {
+        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         return Result.ok(inventoryCheckService.getDetail(id));
     }
 

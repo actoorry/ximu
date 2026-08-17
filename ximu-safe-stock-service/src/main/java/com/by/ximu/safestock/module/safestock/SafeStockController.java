@@ -26,11 +26,13 @@ public class SafeStockController {
     public Result<Map<String, Object>> list(PageQuery pageQuery,
                                             @RequestParam(required = false) String productName,
                                             @RequestParam(required = false) String material) {
+        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         return Result.ok(safeStockService.page(pageQuery, productName, material));
     }
 
     @GetMapping("/{id}")
     public Result<SafeStock> get(@PathVariable Long id) {
+        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         return Result.ok(safeStockService.getById(id));
     }
 
@@ -45,9 +47,25 @@ public class SafeStockController {
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody SafeStock entity) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
-        entity.setId(id);
-        safeStockService.updateById(entity);
-        operationLogService.record("safe-stock", "UPDATE", id, entity.getProductName(), OperatorContext.getOperatorName(), entity);
+        SafeStock existed = safeStockService.getById(id);
+        if (existed == null) {
+            throw new IllegalArgumentException("安全库存配置不存在: " + id);
+        }
+        // 白名单：只允许改配置字段，id/version/createdAt/updatedAt 不可经此修改
+        existed.setProductName(entity.getProductName());
+        existed.setMaterial(entity.getMaterial());
+        existed.setOrgId(entity.getOrgId());
+        existed.setServiceLevel(entity.getServiceLevel());
+        existed.setZValue(entity.getZValue());
+        existed.setReplenishCycle(entity.getReplenishCycle());
+        existed.setEconomicQty(entity.getEconomicQty());
+        existed.setOrderPointQty(entity.getOrderPointQty());
+        existed.setMaxQty(entity.getMaxQty());
+        existed.setSafeStock(entity.getSafeStock());
+        if (!safeStockService.updateById(existed)) {
+            throw new IllegalStateException("并发冲突，请刷新后重试");
+        }
+        operationLogService.record("safe-stock", "UPDATE", id, existed.getProductName(), OperatorContext.getOperatorName(), entity);
         return Result.ok();
     }
 
@@ -55,8 +73,11 @@ public class SafeStockController {
     public Result<Void> delete(@PathVariable Long id) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
         SafeStock existed = safeStockService.getById(id);
+        if (existed == null) {
+            throw new IllegalArgumentException("安全库存配置不存在: " + id);
+        }
         safeStockService.removeById(id);
-        operationLogService.record("safe-stock", "DELETE", id, existed != null ? existed.getProductName() : null, OperatorContext.getOperatorName(), null);
+        operationLogService.record("safe-stock", "DELETE", id, existed.getProductName(), OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 }

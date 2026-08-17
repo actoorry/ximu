@@ -8,7 +8,7 @@
 |---|--------|------|
 | 1 | 认证方案 | **方案 A**：新增 Spring Cloud Gateway 网关统一 JWT 校验，注入 `X-User-Id` / `X-User-Name` / `X-User-Roles` 头；下游服务从服务端上下文取操作人，不信任请求体 |
 | 2 | 库存唯一维度 | **四维唯一**：`org_id + product_name + spec + grade`（明细补 `org_id` 必填、`grade` 可选，联动时 grade/spec 缺省空串匹配） |
-| 3 | 架构定位 | **模块化、可插拔的开源项目**（用户拍板 2026-08-17）：独立部署多模块架构，不嵌入父应用；认证边缘可替换、预警服务可选装、DDL 管理可开关；详见 ARCHITECTURE.md |
+| 3 | 架构定位 | **模块化、可插拔的开源项目**（用户拍板 2026-08-17）：独立部署多模块架构，不嵌入父应用；认证边缘可替换、安全库存配置服务可选装、DDL 管理可开关；详见 ARCHITECTURE.md |
 
 ## 二、改造清单与进度
 
@@ -172,6 +172,13 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - P0-2 下游信任 X-User-* 头可直连伪造管理员：加内部共享令牌 GATEWAY_TOKEN——网关注入 X-Gateway-Token、下游 OperatorContextFilter 校验；真实启动验证 无令牌/错令牌直连→401、正确令牌→200
 - 顺带 P1-4：网关新增 application-prod.yml，JWT_SECRET/GATEWAY_TOKEN 无默认值 fail-fast
 - 验证：5 模块编译通过 + 全量 82 测试全绿 + P0-2 端到端 401/200 验证
+
+### P1 高风险项修复（✅ 2026-08-17，组长执行，外部审计触发）
+- P1-1 账本可篡改：库存/批号/安全库存 update 改白名单赋值+乐观锁返回值检查；库存 actualQty/transitQty/orgId 等账本字段禁 PUT 修改（只允许 ageWarnDays/stockAge）；库存 delete 加非零不可删约束
+- P1-3 读接口零鉴权：13+2 处 list/get 全部补 Auths.requireRole(VIEWER, ADMIN)（grep 对齐验证）
+- P1-5 safe-stock 表无迁移：inventory_safe_stock 纳入 inventory V3 迁移 + schema.sql 同步（此前 flyway=false+sql.init=never 无自动建表途径）
+- P1-2 safe-stock 预警/补货未实现：砍掉定位——safe-stock 降级为「安全库存参数配置维护（仅 CRUD）」，更新 pom/Application/OpenApiConfig/CLAUDE/README/ARCHITECTURE/PLAN 7 处宣称（字段保留）
+- 验证：5 模块编译通过 + 全量 82 测试全绿
 
 ### 首次启动冒烟（✅ 2026-08-17，组长执行）
 - **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
