@@ -44,7 +44,7 @@ ximu 是一个进销存管理系统，聚焦库存域的业务闭环。系统围
 环境要求：JDK 17、Maven 3.9+、MySQL 8。
 
 1. 初始化数据库：执行各服务 `src/main/resources/schema.sql` 建表并写入种子数据。
-2. 配置数据库连接：通过环境变量 `DB_USERNAME` / `DB_PASSWORD` 注入账号密码（默认 `root` / `123456`），或直接修改各服务的 `application.yml`。
+2. 配置数据库连接：通过环境变量 `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` 注入连接串与账号密码（本地开发默认连接 `localhost:3306/ximu`、账号 `root` / `123456`），或直接修改各服务的 `application.yml`。
 3. 构建：
 
 ```bash
@@ -66,6 +66,64 @@ java -jar ximu-safe-stock-service/target/ximu-safe-stock-service-1.0-SNAPSHOT.ja
 
 统一返回结构：`{ "code": 0, "message": "ok", "data": {} }`，`code=0` 表示成功；分页返回 `{ "list": [...], "total": N }`。
 
+## 生产部署
+
+> 生产环境严禁使用任何默认凭据，所有敏感配置一律通过环境变量注入。业务服务通过 `--spring.profiles.active=prod` 激活生产样板（`application-prod.yml`），缺失必填环境变量会启动失败。
+
+### 环境变量清单
+
+| 环境变量 | 含义 | 示例 | 必须性 |
+|----------|------|------|--------|
+| DB_URL | MySQL 连接串（含库名、字符集、时区） | jdbc:mysql://db.internal:3306/ximu?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8mb4 | 生产必须（prod 无默认值） |
+| DB_USERNAME | 数据库账号 | ximu_app | 生产必须（prod 无默认值） |
+| DB_PASSWORD | 数据库密码 | （强随机密码） | 生产必须（prod 无默认值） |
+| JWT_SECRET | JWT 签名密钥（仅网关使用） | （>=32 字节随机串） | 生产必须（网关默认值仅本地开发兜底） |
+| CORS_ORIGINS | 允许的前端来源，逗号分隔多个域名 | https://erp.example.com,https://admin.example.com | 生产必须（prod 无默认值） |
+
+> 说明：`JWT_SECRET` 必须是 >=32 字节随机串（HS256 密钥），可用 `openssl rand -base64 48` 生成。生产激活 `application-prod.yml` 后，`DB_URL` / `DB_USERNAME` / `DB_PASSWORD` / `CORS_ORIGINS` 均无默认值，缺失即启动失败。
+
+### 启动顺序
+
+1. 先启动两个业务服务（二者相互独立，无依赖）：
+   - ximu-inventory-service（端口 8081）
+   - ximu-safe-stock-service（端口 8082）
+2. 再启动网关 ximu-gateway（端口 8080）。
+
+```bash
+# 1) 业务服务（激活生产 profile）
+java -jar ximu-inventory-service/target/ximu-inventory-service-1.0-SNAPSHOT.jar --spring.profiles.active=prod
+java -jar ximu-safe-stock-service/target/ximu-safe-stock-service-1.0-SNAPSHOT.jar --spring.profiles.active=prod
+
+# 2) 网关
+java -jar ximu-gateway/target/ximu-gateway-1.0-SNAPSHOT.jar
+```
+
+> 网关通过 uri 直连 8081/8082 两个服务，因此业务服务必须先于网关就绪；跨机部署时需把网关 `application.yml` 中的 uri 改为内网地址。
+
+### 网关入口
+
+- 统一入口：http://localhost:8080
+- 库存操作：http://localhost:8080/api/inventory/** → 8081
+- 安全库存：http://localhost:8080/api/safe-stock/** → 8082
+
+### 健康检查
+
+| 组件 | 端点 |
+|------|------|
+| 网关 | http://localhost:8080/actuator/health |
+| 库存操作服务 | http://localhost:8081/actuator/health |
+| 安全库存服务 | http://localhost:8082/actuator/health |
+
+（仅暴露 health、info 端点，见各服务 `management.endpoints.web.exposure.include`。）
+
+### ⚠️ 安全警告：网络隔离
+
+两个业务服务只信任网关注入的身份头 X-User-Id / X-User-Name / X-User-Roles，自身不内置认证，因此生产必须：
+
+- 将 8081 / 8082 两个业务服务网络隔离在网关之后（防火墙 / 安全组只放行 8080，不对外暴露 8081 / 8082）。
+- 严禁客户端绕过网关直连业务服务，否则攻击者可伪造 X-User-* 头冒充任意用户，认证形同虚设。
+- 保持各服务 `app.auth.enabled: true`（默认即如此），仅本地开发可临时关闭。
+
 ## 目录结构
 
 ```
@@ -73,6 +131,7 @@ ximu
 ├── ximu-common                公共模块（统一返回结构、分页基类）
 ├── ximu-inventory-service     库存操作微服务（端口 8081）
 ├── ximu-safe-stock-service    安全库存微服务（端口 8082）
+├── ximu-gateway               统一网关（端口 8080，JWT 校验 + 身份头注入）
 └── pom.xml                    父工程（依赖版本管理）
 ```
 

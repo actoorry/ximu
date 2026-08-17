@@ -1,0 +1,51 @@
+# =============================================================================
+# 生产环境样板配置（application-prod.yml）
+# -----------------------------------------------------------------------------
+# 激活方式：java -jar ximu-inventory-service-*.jar --spring.profiles.active=prod
+# Spring Boot 会同时加载 application.yml 与 application-prod.yml，
+# 本文件中的同名键优先于 application.yml（其余键如 server.port、mybatis-plus、management 沿用默认值）。
+#
+# 与本地开发默认值（application.yml）的关键差异：
+#   1. DB_URL / DB_USERNAME / DB_PASSWORD / CORS_ORIGINS 全部无默认值，
+#      缺失任一环境变量都会在启动时报 "Could not resolve placeholder" 而失败。
+#   2. HikariCP 连接池采用保守值（maximum-pool-size: 30）。
+#   3. 关闭 SQL 初始化（spring.sql.init.mode: never），DDL 由 Flyway/Liquibase 或 DBA 管理。
+#   4. 日志级别收紧为 info。
+#
+# 安全警告：本文件不含任何真实凭据，所有敏感项必须通过环境变量注入。
+# =============================================================================
+
+spring:
+  datasource:
+    url: "${DB_URL}"
+    username: "${DB_USERNAME}"
+    password: "${DB_PASSWORD}"
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  sql:
+    init:
+      mode: never
+      encoding: UTF-8
+  flyway:
+    # Flyway 迁移（inventory-service 独占库 ximu 的 DDL 迁移权）；生产固定开启
+    # 存量库首次启动：baseline-on-migrate=true 先打 baseline 1 并跳过 V1；新库直接执行 V1。
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 1
+    locations: classpath:db/migration
+
+app:
+  cors:
+    allowed-origins: "${CORS_ORIGINS}"
+  auth:
+    # 生产必须 true：身份头只信任网关注入，禁止绕过网关直连
+    enabled: true
+
+logging:
+  level:
+    com.by.ximu: info

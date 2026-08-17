@@ -1,3 +1,16 @@
+# =============================================================================
+# 生产部署安全警告（IMPORTANT）
+# -----------------------------------------------------------------------------
+# 生产环境必须通过环境变量注入以下配置，严禁使用本文件中的默认值出生产：
+#   - DB_URL          数据库连接串（含库名、字符集、时区）
+#   - DB_USERNAME     数据库账号
+#   - DB_PASSWORD     数据库密码
+#   - JWT_SECRET      JWT 签名密钥（>=32 字节随机串，仅网关使用）
+#   - CORS_ORIGINS    允许的前端来源（逗号分隔多个域名）
+# 本文件中的默认值（localhost / root / 123456 / localhost:5173 等）仅为本地开发兜底。
+# 生产激活方式：--spring.profiles.active=prod（见同目录 application-prod.yml，缺失必填项会启动失败）。
+# =============================================================================
+
 server:
   port: 8081
 
@@ -5,7 +18,7 @@ spring:
   application:
     name: ximu-inventory-service
   datasource:
-    url: jdbc:mysql://localhost:3306/ximu?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8
+    url: "${DB_URL:jdbc:mysql://localhost:3306/ximu?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8mb4}"
     username: "${DB_USERNAME:root}"
     password: "${DB_PASSWORD:123456}"
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -20,11 +33,19 @@ spring:
       # 开发环境可改为 always 自动建表+种子数据；生产环境必须 never（用 Flyway/Liquibase 或手动管理 DDL）
       mode: never
       encoding: UTF-8
+  flyway:
+    # Flyway 迁移（inventory-service 独占库 ximu 的 DDL 迁移权）
+    # 存量库首次启动：baseline-on-migrate=true 先打 baseline 1 并跳过 V1；新库直接执行 V1 建全表+种子。
+    # dev 若仍想用 spring.sql.init 建表，可设 FLYWAY_ENABLED=false（二者别同时开，避免重复建表）。
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+    baseline-version: 1
+    locations: classpath:db/migration
 
-# 跨域允许的前端来源（逗号分隔），生产环境按需收紧
+# 跨域允许的前端来源（逗号分隔），统一走 CORS_ORIGINS 环境变量；生产按真实域名收紧，不要回退为 *
 app:
   cors:
-    allowed-origins: "http://localhost:5173,http://localhost:3000"
+    allowed-origins: "${CORS_ORIGINS:http://localhost:5173,http://localhost:3000}"
   auth:
     # 生产保持 true（要求网关注入身份头）；仅本地开发可临时 false
     enabled: true

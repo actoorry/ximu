@@ -11,6 +11,8 @@
     <file url="file://$PROJECT_DIR$/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/ximu-common/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/ximu-common/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/ximu-gateway/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/ximu-gateway/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/ximu-inventory-service/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/ximu-inventory-service/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/ximu-safe-stock-service/src/main/java" charset="UTF-8" />
