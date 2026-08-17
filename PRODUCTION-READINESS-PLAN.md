@@ -160,6 +160,11 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 四 Service create 幂等：requestId 非空先查重返回已存在单据；save 捕获 DuplicateKeyException 兜底并发（唯一索引）
 - 真实 MySQL 冒烟验证：同 requestId 提交两次返回同一单（id=3 单号 IN...001 不重复）；不同/空 requestId 正常建新单；并发同 requestId 唯一索引兜底 1 成功 1 Duplicate；V1+V2 迁移成功（now at version v2）；全量 82 测试全绿
 
+### OpenAPI 文档（✅ 2026-08-17，组长执行）
+- 根 pom dependencyManagement 加 springdoc-openapi 2.5.0（对齐 Spring Boot 3.2.5）；两业务服务加 springdoc-openapi-starter-webmvc-ui（gateway 为 WebFlux 不加）
+- 两服务加 OpenApiConfig：文档标题/版本 + 身份头契约（X-User-Id/X-User-Name/X-User-Roles）声明为 API 级安全头，Swagger UI 顶部 Authorize 可填
+- 真实启动验证：/v3/api-docs 返回 13 个接口路径（inbound/outbound/check/transfer/stock/batch/log 全量）；/swagger-ui/index.html 可达（HTTP 200）
+
 ### 首次启动冒烟（✅ 2026-08-17，组长执行）
 - **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
 - 接口冒烟全通过：health=UP；无身份头 → HTTP 401（RBAC 拦截）；带 ADMIN 头列表 → 200 + V1 种子数据；POST 建单 → `IN20260817001`（原子取号真机工作）+ 库存联动建行 + 库龄预警真实触发（电解铜 16 天>15 阈值 warn=true）
