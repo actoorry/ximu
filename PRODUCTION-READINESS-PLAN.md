@@ -154,6 +154,7 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 接口冒烟全通过：health=UP；无身份头 → HTTP 401（RBAC 拦截）；带 ADMIN 头列表 → 200 + V1 种子数据；POST 建单 → `IN20260817001`（原子取号真机工作）+ 库存联动建行 + 库龄预警真实触发（电解铜 16 天>15 阈值 warn=true）
 - **发现并修复真实 bug**：`characterEncoding=utf8mb4` 是非法值（Connector/J 8.x 只认 Java 字符集名），启动即 `Unsupported character encoding`；改为 `characterEncoding=utf8`（MySQL 8 服务端默认即 utf8mb4）。4 处：两服务 application.yml + README + 本计划文档。**该 bug 编译/单测均无法发现，仅真机启动暴露**
 - 构建加速：新增 `mvn-settings.xml`（阿里云 central 镜像），下载从 3~17 KB/s 提升至 165 KB/s~2.7 MB/s
+- 冒烟固化：新增 `scripts/smoke-test.ps1`（打包→全新库启动→Flyway 迁移→健康轮询→401 拦截→建单取号→库存联动→停服，5 步断言），语法校验通过，各断言与手动冒烟逐条一致
 
 ### 组长终验结论（2026-08-17）
 - 改造清单中 **P0 全部、P1 全部、P2 除 P2-10/P2-13 外全部完成**，均有代码 + 测试 + 构建证据
