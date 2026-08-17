@@ -11,6 +11,7 @@ import com.by.ximu.inventory.module.log.OperationLogService;
 import com.by.ximu.inventory.module.stock.StockOperationService;
 import com.by.ximu.inventory.util.DocNoSequenceService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -72,6 +73,14 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
     @Transactional
     public OutboundDetailVO create(OutboundCreateRequest req) {
         Auths.requireRole(Role.CREATOR, Role.ADMIN);
+        // 幂等：requestId 非空时先查重，命中则返回已存在单据
+        String requestId = req.getRequestId();
+        if (StringUtils.hasText(requestId)) {
+            Outbound existed = getOne(new LambdaQueryWrapper<Outbound>().eq(Outbound::getRequestId, requestId), false);
+            if (existed != null) {
+                return toVo(existed, listItems(existed.getId()));
+            }
+        }
         String docNo = req.getOutboundNo();
         if (!StringUtils.hasText(docNo)) {
             docNo = nextDocNo();
@@ -89,7 +98,16 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
         head.setDriverPhone(req.getDriverPhone());
         head.setStatus("CREATED");
         head.setCreatedBy(OperatorContext.getOperatorId());
-        save(head);
+        head.setRequestId(requestId);
+        try {
+            save(head);
+        } catch (DuplicateKeyException e) {
+            Outbound existed = getOne(new LambdaQueryWrapper<Outbound>().eq(Outbound::getRequestId, requestId), false);
+            if (existed != null) {
+                return toVo(existed, listItems(existed.getId()));
+            }
+            throw e;
+        }
         if (items != null) {
             for (OutboundItem it : items) {
                 it.setId(null);

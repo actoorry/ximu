@@ -11,6 +11,7 @@ import com.by.ximu.inventory.module.log.OperationLogService;
 import com.by.ximu.inventory.module.stock.StockOperationService;
 import com.by.ximu.inventory.util.DocNoSequenceService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -75,6 +76,13 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
     @Transactional
     public CheckDetailVO create(CheckCreateRequest req) {
         Auths.requireRole(Role.CREATOR, Role.ADMIN);
+        String requestId = req.getRequestId();
+        if (StringUtils.hasText(requestId)) {
+            InventoryCheck existed = getOne(new LambdaQueryWrapper<InventoryCheck>().eq(InventoryCheck::getRequestId, requestId), false);
+            if (existed != null) {
+                return toVo(existed, listItems(existed.getId()));
+            }
+        }
         String docNo = req.getCheckNo();
         if (!StringUtils.hasText(docNo)) {
             docNo = nextDocNo();
@@ -87,7 +95,16 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         head.setBatchNo(req.getBatchNo());
         head.setStatus("CREATED");
         head.setCreatedBy(OperatorContext.getOperatorId());
-        save(head);
+        head.setRequestId(requestId);
+        try {
+            save(head);
+        } catch (DuplicateKeyException e) {
+            InventoryCheck existed = getOne(new LambdaQueryWrapper<InventoryCheck>().eq(InventoryCheck::getRequestId, requestId), false);
+            if (existed != null) {
+                return toVo(existed, listItems(existed.getId()));
+            }
+            throw e;
+        }
         if (items != null) {
             for (CheckItem it : items) {
                 it.setId(null);

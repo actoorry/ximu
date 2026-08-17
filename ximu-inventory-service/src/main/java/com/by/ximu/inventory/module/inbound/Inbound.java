@@ -37,6 +37,9 @@ public class Inbound {
     /** 制单人ID（用于职责分离校验） */
     private Long createdBy;
 
+    /** 客户端幂等键（防双击/重试重复建单） */
+    private String requestId;
+
     private String checker;
 
     /** 直接审核 / 总监审核 / 经理审核 */

@@ -11,6 +11,7 @@ import com.by.ximu.inventory.module.log.OperationLogService;
 import com.by.ximu.inventory.module.stock.StockOperationService;
 import com.by.ximu.inventory.util.DocNoSequenceService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -75,6 +76,14 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
     @Transactional
     public InboundDetailVO create(InboundCreateRequest req) {
         Auths.requireRole(Role.CREATOR, Role.ADMIN);
+        // 0. 幂等：requestId 非空时先查重，命中则返回已存在单据（防双击/重试重复建单）
+        String requestId = req.getRequestId();
+        if (StringUtils.hasText(requestId)) {
+            Inbound existed = getOne(new LambdaQueryWrapper<Inbound>().eq(Inbound::getRequestId, requestId), false);
+            if (existed != null) {
+                return toVo(existed, listItems(existed.getId()));
+            }
+        }
         // 1. 单号：不传则生成，传了则校验唯一（唯一索引兜底）
         String docNo = req.getInboundNo();
         if (!StringUtils.hasText(docNo)) {
@@ -93,7 +102,17 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         head.setAuditLevel(req.getAuditLevel());
         head.setStatus("CREATED");
         head.setCreatedBy(OperatorContext.getOperatorId());
-        save(head);
+        head.setRequestId(requestId);
+        try {
+            save(head);
+        } catch (DuplicateKeyException e) {
+            // 并发下同 requestId 同时插入，唯一索引兜底：返回已存在的单据
+            Inbound existed = getOne(new LambdaQueryWrapper<Inbound>().eq(Inbound::getRequestId, requestId), false);
+            if (existed != null) {
+                return toVo(existed, listItems(existed.getId()));
+            }
+            throw e;
+        }
         // 4. 保存明细
         if (items != null) {
             for (InboundItem it : items) {

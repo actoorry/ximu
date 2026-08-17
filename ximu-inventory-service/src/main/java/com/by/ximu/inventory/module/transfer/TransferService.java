@@ -10,6 +10,7 @@ import com.by.ximu.common.Role;
 import com.by.ximu.inventory.module.log.OperationLogService;
 import com.by.ximu.inventory.util.DocNoSequenceService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -73,6 +74,13 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
     @Transactional
     public TransferDetailVO create(TransferCreateRequest req) {
         Auths.requireRole(Role.CREATOR, Role.ADMIN);
+        String requestId = req.getRequestId();
+        if (StringUtils.hasText(requestId)) {
+            Transfer existed = getOne(new LambdaQueryWrapper<Transfer>().eq(Transfer::getRequestId, requestId), false);
+            if (existed != null) {
+                return toVo(existed, listItems(existed.getId()));
+            }
+        }
         String docNo = req.getTransferNo();
         if (!StringUtils.hasText(docNo)) {
             docNo = nextDocNo();
@@ -85,7 +93,16 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
         head.setBatchNo(req.getBatchNo());
         head.setStatus("CREATED");
         head.setCreatedBy(OperatorContext.getOperatorId());
-        save(head);
+        head.setRequestId(requestId);
+        try {
+            save(head);
+        } catch (DuplicateKeyException e) {
+            Transfer existed = getOne(new LambdaQueryWrapper<Transfer>().eq(Transfer::getRequestId, requestId), false);
+            if (existed != null) {
+                return toVo(existed, listItems(existed.getId()));
+            }
+            throw e;
+        }
         if (items != null) {
             for (TransferItem it : items) {
                 it.setId(null);

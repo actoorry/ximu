@@ -34,6 +34,9 @@ public class Transfer {
     /** 制单人ID（用于职责分离校验） */
     private Long createdBy;
 
+    /** 客户端幂等键（防双击/重试重复建单） */
+    private String requestId;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime createdAt;
 

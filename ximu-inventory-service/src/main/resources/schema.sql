@@ -16,11 +16,13 @@ CREATE TABLE IF NOT EXISTS inventory_inbound (
     created_by BIGINT NOT NULL COMMENT '制单人ID',
     checker VARCHAR(64) DEFAULT NULL,
     audit_level VARCHAR(20) DEFAULT NULL COMMENT '直接审核/总监审核/经理审核',
+    request_id VARCHAR(64) DEFAULT NULL COMMENT '客户端幂等键',
     version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_inbound_no (inbound_no)
+    UNIQUE KEY uk_inbound_no (inbound_no),
+    UNIQUE KEY uk_inbound_request_id (request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 1.1 入库明细（一张入库单可含多行商品）
@@ -53,11 +55,13 @@ CREATE TABLE IF NOT EXISTS inventory_outbound (
     driver_phone VARCHAR(11) DEFAULT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'CREATED' COMMENT 'CREATED/APPROVED',
     created_by BIGINT NOT NULL COMMENT '制单人ID',
+    request_id VARCHAR(64) DEFAULT NULL COMMENT '客户端幂等键',
     version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_outbound_no (outbound_no)
+    UNIQUE KEY uk_outbound_no (outbound_no),
+    UNIQUE KEY uk_outbound_request_id (request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 2.1 出库明细
@@ -82,13 +86,15 @@ CREATE TABLE IF NOT EXISTS inventory_check (
     id BIGINT NOT NULL AUTO_INCREMENT,
     check_no VARCHAR(64) NOT NULL,
     batch_no VARCHAR(64) DEFAULT NULL,
+    request_id VARCHAR(64) DEFAULT NULL COMMENT '客户端幂等键',
     status VARCHAR(20) NOT NULL DEFAULT 'CREATED' COMMENT 'CREATED/APPROVED/CHECKED',
     created_by BIGINT NOT NULL COMMENT '制单人ID',
     version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_check_no (check_no)
+    UNIQUE KEY uk_check_no (check_no),
+    UNIQUE KEY uk_check_request_id (request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 3.1 盘点明细
@@ -114,13 +120,15 @@ CREATE TABLE IF NOT EXISTS inventory_transfer (
     id BIGINT NOT NULL AUTO_INCREMENT,
     transfer_no VARCHAR(64) NOT NULL,
     batch_no VARCHAR(64) DEFAULT NULL,
+    request_id VARCHAR(64) DEFAULT NULL COMMENT '客户端幂等键',
     status VARCHAR(20) NOT NULL DEFAULT 'CREATED' COMMENT 'CREATED/APPROVED/COMPLETED',
     created_by BIGINT NOT NULL COMMENT '制单人ID',
     version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_transfer_no (transfer_no)
+    UNIQUE KEY uk_transfer_no (transfer_no),
+    UNIQUE KEY uk_transfer_request_id (request_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 4.1 调拨明细

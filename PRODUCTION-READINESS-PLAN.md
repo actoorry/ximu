@@ -155,6 +155,11 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 验证：修复后并发程序 success=1 conflict=1、库存=2 不为负（冲突单抛异常回滚）；StockOperationServiceTest 21→24 例（新增 3 例乐观锁冲突抛异常），全量 82 测试全绿
 - 注意：Testcontainers 容器级并发压测仍依赖 Docker/CI（沙箱内 docker 不可见），本次为真实 MySQL 进程级并发验证 + 单测固化
 
+### 接口幂等键（✅ 2026-08-17，组长执行）
+- 四张单据头表加 request_id 列 + 唯一索引（uk_xxx_request_id），V2 迁移 + schema.sql 同步；四实体/四 DTO 加 requestId 字段
+- 四 Service create 幂等：requestId 非空先查重返回已存在单据；save 捕获 DuplicateKeyException 兜底并发（唯一索引）
+- 真实 MySQL 冒烟验证：同 requestId 提交两次返回同一单（id=3 单号 IN...001 不重复）；不同/空 requestId 正常建新单；并发同 requestId 唯一索引兜底 1 成功 1 Duplicate；V1+V2 迁移成功（now at version v2）；全量 82 测试全绿
+
 ### 首次启动冒烟（✅ 2026-08-17，组长执行）
 - **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
 - 接口冒烟全通过：health=UP；无身份头 → HTTP 401（RBAC 拦截）；带 ADMIN 头列表 → 200 + V1 种子数据；POST 建单 → `IN20260817001`（原子取号真机工作）+ 库存联动建行 + 库龄预警真实触发（电解铜 16 天>15 阈值 warn=true）

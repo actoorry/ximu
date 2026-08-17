@@ -17,6 +17,9 @@ import java.util.List;
 public class OutboundCreateRequest {
 
     /** 单号（可选，不传则后端自动生成） */
+    /** 客户端幂等键（防双击/重试重复建单，可选） */
+    private String requestId;
+
     private String outboundNo;
 
     private String saleOrderNo;
