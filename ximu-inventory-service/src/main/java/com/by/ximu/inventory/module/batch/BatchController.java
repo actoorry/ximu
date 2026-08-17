@@ -1,6 +1,8 @@
 package com.by.ximu.inventory.module.batch;
 
+import com.by.ximu.common.Auths;
 import com.by.ximu.common.OperatorContext;
+import com.by.ximu.common.Role;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
 import com.by.ximu.inventory.module.log.OperationLogService;
@@ -35,6 +37,7 @@ public class BatchController {
 
     @PostMapping
     public Result<Batch> create(@Valid @RequestBody Batch entity) {
+        Auths.requireRole(Role.CHECKER, Role.ADMIN);
         batchService.save(entity);
         operationLogService.record("batch", "CREATE", entity.getId(), entity.getBatchNo(), OperatorContext.getOperatorName(), entity);
         return Result.ok(entity);
@@ -42,6 +45,7 @@ public class BatchController {
 
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Batch entity) {
+        Auths.requireRole(Role.CHECKER, Role.ADMIN);
         entity.setId(id);
         batchService.updateById(entity);
         operationLogService.record("batch", "UPDATE", id, entity.getBatchNo(), OperatorContext.getOperatorName(), entity);
@@ -50,6 +54,7 @@ public class BatchController {
 
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        Auths.requireRole(Role.CHECKER, Role.ADMIN);
         Batch existed = batchService.getById(id);
         batchService.removeById(id);
         operationLogService.record("batch", "DELETE", id, existed != null ? existed.getBatchNo() : null, OperatorContext.getOperatorName(), null);

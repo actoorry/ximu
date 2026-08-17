@@ -1,9 +1,7 @@
 package com.by.ximu.inventory.module.inbound;
 
-import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
-import com.by.ximu.inventory.module.log.OperationLogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -13,12 +11,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 入库 Controller。
+ * 入库 Controller（薄层：角色校验、状态机、库存联动、审计日志均在 Service 事务内完成）。
  *
  * <p>create 接收「头 + items」请求体，返回 DetailVO（头 + items + totalQty）；
  * get/list 同样返回头 + items/totalQty。
  * <p>流转字段集合：{@code id / status / action / auditLevel / checker / operator}；
- * PUT /{id} 当 body 含 action 时走状态机流转，否则走普通编辑。
+ * PUT /{id} 当 body 含 action 时走状态机流转，否则走普通编辑（白名单 DTO 绑定）。
  */
 @RestController
 @RequestMapping("/api/inventory/inbound")
@@ -26,7 +24,6 @@ import java.util.Set;
 public class InboundController {
 
     private final InboundService inboundService;
-    private final OperationLogService operationLogService;
     private final ObjectMapper objectMapper;
 
     /** 入库单据的流转字段集合 */
@@ -46,15 +43,15 @@ public class InboundController {
 
     @PostMapping
     public Result<InboundDetailVO> create(@Valid @RequestBody InboundCreateRequest req) {
-        InboundDetailVO vo = inboundService.create(req);
-        operationLogService.record("inbound", "CREATE", vo.getId(), vo.getInboundNo(), OperatorContext.getOperatorName(), req);
-        return Result.ok(vo);
+        return Result.ok(inboundService.create(req));
     }
 
     /**
      * 编辑 / 流转入库单。
      *
-     * <p>body 含 {@code action} 字段 → 流转（approve/check）；否则普通编辑（status 置 null 防越权）。
+     * <p>body 含 {@code action} 字段 → 流转（approve/check）；否则普通编辑。
+     * <p>普通编辑绑定 {@link InboundUpdateRequest} 白名单 DTO，
+     * {@code id/status/version/createdBy/时间戳} 等字段即使传入也会被忽略。
      */
     @PutMapping("/{id}")
     public Result<Void> updateOrTransition(@PathVariable Long id, @RequestBody Map<String, Object> body) {
@@ -64,38 +61,26 @@ public class InboundController {
                 case "approve" -> {
                     String auditLevel = body.get("auditLevel") != null ? String.valueOf(body.get("auditLevel")) : null;
                     inboundService.approve(id, auditLevel);
-                    operationLogService.record("inbound", "APPROVE", id, null, OperatorContext.getOperatorName(), Map.of("auditLevel", auditLevel == null ? "" : auditLevel));
                 }
                 case "check" -> {
                     String checker = body.get("checker") != null ? String.valueOf(body.get("checker")) : null;
                     inboundService.check(id, checker);
-                    operationLogService.record("inbound", "CHECK", id, null, OperatorContext.getOperatorName(), Map.of("checker", checker == null ? "" : checker));
                 }
                 default -> throw new IllegalArgumentException("不支持的流转动作: " + action);
             }
             return Result.ok();
         }
-        // 普通编辑：转 Entity，状态置 null 防越权
-        Inbound entity = objectMapper.convertValue(body, Inbound.class);
-        entity.setId(id);
-        entity.setStatus(null);
-        inboundService.updateById(entity);
-        operationLogService.record("inbound", "UPDATE", id, entity.getInboundNo(), OperatorContext.getOperatorName(), entity);
+        inboundService.updateHead(id, objectMapper.convertValue(body, InboundUpdateRequest.class));
         return Result.ok();
     }
 
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
-        Inbound existed = inboundService.getById(id);
         inboundService.deleteWithItems(id);
-        operationLogService.record("inbound", "DELETE", id, existed != null ? existed.getInboundNo() : null, OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 
-    /** 判断是否为流转请求：body 的所有 key 都属于流转字段集合 */
     private boolean isTransition(Map<String, Object> body) {
         return body.containsKey("action") && body.keySet().stream().allMatch(TRANSITION_KEYS::contains);
     }
-
-
 }

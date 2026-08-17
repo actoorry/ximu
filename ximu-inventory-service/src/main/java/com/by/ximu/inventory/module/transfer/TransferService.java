@@ -3,16 +3,18 @@ package com.by.ximu.inventory.module.transfer;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.by.ximu.common.Auths;
+import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
-import com.by.ximu.inventory.util.DocNoGenerator;
+import com.by.ximu.common.Role;
+import com.by.ximu.inventory.module.log.OperationLogService;
+import com.by.ximu.inventory.util.DocNoSequenceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -32,10 +34,10 @@ import java.util.stream.Collectors;
 public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
 
     private static final String PREFIX = "TR";
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final Object DOCNO_LOCK = new Object();
 
     private final TransferItemMapper transferItemMapper;
+    private final OperationLogService operationLogService;
+    private final DocNoSequenceService docNoSequenceService;
 
     /**
      * 分页查询（支持按状态/批号筛选 + keyword 模糊搜索调拨单号/批号）。
@@ -70,6 +72,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
      */
     @Transactional
     public TransferDetailVO create(TransferCreateRequest req) {
+        Auths.requireRole(Role.CREATOR, Role.ADMIN);
         String docNo = req.getTransferNo();
         if (!StringUtils.hasText(docNo)) {
             docNo = nextDocNo();
@@ -81,6 +84,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
         head.setTransferNo(docNo);
         head.setBatchNo(req.getBatchNo());
         head.setStatus("CREATED");
+        head.setCreatedBy(OperatorContext.getOperatorId());
         save(head);
         if (items != null) {
             for (TransferItem it : items) {
@@ -89,6 +93,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
                 transferItemMapper.insert(it);
             }
         }
+        operationLogService.recordInTx("transfer", "CREATE", head.getId(), head.getTransferNo(), OperatorContext.getOperatorName(), req);
         return toVo(head, items);
     }
 
@@ -101,11 +106,14 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
         if (transfer == null) {
             throw new IllegalArgumentException("调拨单不存在: " + id);
         }
+        Auths.requireRole(Role.APPROVER, Role.ADMIN);
+        Auths.requireNotSelfOrAdmin(transfer.getCreatedBy());
         if (!"CREATED".equals(transfer.getStatus())) {
             throw new IllegalStateException("当前状态[" + transfer.getStatus() + "]不允许批准，仅 CREATED 状态可批准");
         }
         transfer.setStatus("APPROVED");
         updateById(transfer);
+        operationLogService.recordInTx("transfer", "APPROVE", id, transfer.getTransferNo(), OperatorContext.getOperatorName(), null);
     }
 
     /**
@@ -119,11 +127,14 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
         if (transfer == null) {
             throw new IllegalArgumentException("调拨单不存在: " + id);
         }
+        Auths.requireRole(Role.CHECKER, Role.ADMIN);
+        Auths.requireNotSelfOrAdmin(transfer.getCreatedBy());
         if (!"APPROVED".equals(transfer.getStatus())) {
             throw new IllegalStateException("当前状态[" + transfer.getStatus() + "]不允许完成，仅 APPROVED 状态可完成");
         }
         transfer.setStatus("COMPLETED");
         updateById(transfer);
+        operationLogService.recordInTx("transfer", "COMPLETE", id, transfer.getTransferNo(), OperatorContext.getOperatorName(), null);
     }
 
     /**
@@ -138,8 +149,40 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
         if (head != null && !"CREATED".equals(head.getStatus())) {
             throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
         }
+        if (head != null) {
+            Auths.requireCreatorOrAdmin(head.getCreatedBy());
+        }
         transferItemMapper.delete(new LambdaQueryWrapper<TransferItem>().eq(TransferItem::getTransferId, id));
         removeById(id);
+        if (head != null) {
+            operationLogService.recordInTx("transfer", "DELETE", id, head.getTransferNo(), OperatorContext.getOperatorName(), null);
+        }
+    }
+
+    /**
+     * 编辑调拨单头（白名单字段）：仅本人 CREATED 单据可编辑（ADMIN 不限）。
+     *
+     * <p>请求经 {@link TransferUpdateRequest} 白名单绑定，{@code id/status/version/createdBy/时间戳} 不可经此修改；
+     * 部分更新语义：DTO 字段为 null 表示保持原值。
+     * <p>编辑与审计同事务；乐观锁冲突时抛异常提示刷新重试。
+     */
+    @Transactional
+    public void updateHead(Long id, TransferUpdateRequest req) {
+        Transfer existed = getById(id);
+        if (existed == null) {
+            throw new IllegalArgumentException("调拨单不存在: " + id);
+        }
+        if (!"CREATED".equals(existed.getStatus())) {
+            throw new IllegalStateException("仅 CREATED 状态可编辑");
+        }
+        Auths.requireCreatorOrAdmin(existed.getCreatedBy());
+        if (req.getBatchNo() != null) {
+            existed.setBatchNo(req.getBatchNo());
+        }
+        if (!updateById(existed)) {
+            throw new IllegalStateException("并发冲突，单据已被他人修改，请刷新后重试");
+        }
+        operationLogService.recordInTx("transfer", "UPDATE", id, existed.getTransferNo(), OperatorContext.getOperatorName(), req);
     }
 
     /** 查询头 + 明细，组装 VO（GET /{id}） */
@@ -218,19 +261,9 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    /** 生成当天调拨单号（DB 原子取号，多实例安全） */
     private String nextDocNo() {
-        synchronized (DOCNO_LOCK) {
-            List<Transfer> todays = list(new LambdaQueryWrapper<Transfer>()
-                    .likeRight(Transfer::getTransferNo, PREFIX + today())
-                    .select(Transfer::getTransferNo));
-            List<String> nos = todays.stream().map(Transfer::getTransferNo).collect(Collectors.toList());
-            long maxSeq = DocNoGenerator.maxSeqOf(nos, PREFIX.length());
-            return DocNoGenerator.generate(PREFIX, maxSeq);
-        }
-    }
-
-    private static String today() {
-        return LocalDate.now().format(DATE_FMT);
+        return docNoSequenceService.next(PREFIX);
     }
 
     private Page<Transfer> buildPage(PageQuery query) {

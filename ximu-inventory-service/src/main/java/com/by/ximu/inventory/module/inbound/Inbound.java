@@ -34,6 +34,9 @@ public class Inbound {
     /** CREATED / APPROVED / CHECKED */
     private String status;
 
+    /** 制单人ID（用于职责分离校验） */
+    private Long createdBy;
+
     private String checker;
 
     /** 直接审核 / 总监审核 / 经理审核 */

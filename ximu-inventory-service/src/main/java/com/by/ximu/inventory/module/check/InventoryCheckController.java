@@ -1,9 +1,7 @@
 package com.by.ximu.inventory.module.check;
 
-import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
-import com.by.ximu.inventory.module.log.OperationLogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -13,12 +11,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 盘点 Controller。
+ * 盘点 Controller（薄层：角色校验、状态机、库存联动、审计日志均在 Service 事务内完成）。
  *
  * <p>create 接收「头 + items」请求体，返回 DetailVO（头 + items + totalQty）；
  * get/list 同样返回头 + items/totalQty。
  * <p>流转字段集合：{@code id / status / action / operator}；
- * PUT /{id} 当 body 含 action 时走状态机流转（approve/check），否则走普通编辑。
+ * PUT /{id} 当 body 含 action 时走状态机流转（approve/check），否则走普通编辑（白名单 DTO 绑定）。
  */
 @RestController
 @RequestMapping("/api/inventory/check")
@@ -26,7 +24,6 @@ import java.util.Set;
 public class InventoryCheckController {
 
     private final InventoryCheckService inventoryCheckService;
-    private final OperationLogService operationLogService;
     private final ObjectMapper objectMapper;
 
     private static final Set<String> TRANSITION_KEYS = Set.of("id", "status", "action", "operator");
@@ -45,47 +42,38 @@ public class InventoryCheckController {
 
     @PostMapping
     public Result<CheckDetailVO> create(@Valid @RequestBody CheckCreateRequest req) {
-        CheckDetailVO vo = inventoryCheckService.create(req);
-        operationLogService.record("check", "CREATE", vo.getId(), vo.getCheckNo(), OperatorContext.getOperatorName(), req);
-        return Result.ok(vo);
+        return Result.ok(inventoryCheckService.create(req));
     }
 
+    /**
+     * 编辑 / 流转盘点单。
+     *
+     * <p>body 含 {@code action} 字段 → 流转（approve/check）；否则普通编辑。
+     * <p>普通编辑绑定 {@link CheckUpdateRequest} 白名单 DTO，
+     * {@code id/status/version/createdBy/时间戳} 等字段即使传入也会被忽略。
+     */
     @PutMapping("/{id}")
     public Result<Void> updateOrTransition(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         if (isTransition(body)) {
             String action = String.valueOf(body.get("action"));
             switch (action) {
-                case "approve" -> {
-                    inventoryCheckService.approve(id);
-                    operationLogService.record("check", "APPROVE", id, null, OperatorContext.getOperatorName(), null);
-                }
-                case "check" -> {
-                    inventoryCheckService.check(id);
-                    operationLogService.record("check", "CHECK", id, null, OperatorContext.getOperatorName(), null);
-                }
+                case "approve" -> inventoryCheckService.approve(id);
+                case "check" -> inventoryCheckService.check(id);
                 default -> throw new IllegalArgumentException("不支持的流转动作: " + action);
             }
             return Result.ok();
         }
-        InventoryCheck entity = objectMapper.convertValue(body, InventoryCheck.class);
-        entity.setId(id);
-        entity.setStatus(null); // 防越权
-        inventoryCheckService.updateById(entity);
-        operationLogService.record("check", "UPDATE", id, entity.getCheckNo(), OperatorContext.getOperatorName(), entity);
+        inventoryCheckService.updateHead(id, objectMapper.convertValue(body, CheckUpdateRequest.class));
         return Result.ok();
     }
 
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
-        InventoryCheck existed = inventoryCheckService.getById(id);
         inventoryCheckService.deleteWithItems(id);
-        operationLogService.record("check", "DELETE", id, existed != null ? existed.getCheckNo() : null, OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 
     private boolean isTransition(Map<String, Object> body) {
         return body.containsKey("action") && body.keySet().stream().allMatch(TRANSITION_KEYS::contains);
     }
-
-
 }

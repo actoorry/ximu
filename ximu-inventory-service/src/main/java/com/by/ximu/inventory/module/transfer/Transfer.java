@@ -31,6 +31,9 @@ public class Transfer {
     /** CREATED / APPROVED / COMPLETED */
     private String status;
 
+    /** 制单人ID（用于职责分离校验） */
+    private Long createdBy;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime createdAt;
 

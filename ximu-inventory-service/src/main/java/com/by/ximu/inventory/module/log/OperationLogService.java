@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.by.ximu.common.PageQuery;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,6 +47,35 @@ public class OperationLogService extends ServiceImpl<OperationLogMapper, Operati
             save(entity);
         } catch (Exception e) {
             log.warn("记录操作日志失败: module={}, operation={}, err={}", module, operation, e.getMessage());
+        }
+    }
+
+    /**
+     * 事务内记录一条操作日志（审计与业务同事务、同成败）。
+     *
+     * <p>与 {@link #record} 不同：本方法不吞异常，任何失败都会抛出并连带回滚调用方事务，
+     * 保证「业务成功 ⇔ 审计成功」。仅限已开启事务的业务方法内调用；
+     * 非事务上下文（如基础数据维护接口）请继续使用 {@link #record}。
+     */
+    public void recordInTx(String module, String operation, Long targetId, String targetNo, String operator, Object detail) {
+        OperationLog entity = new OperationLog();
+        entity.setModule(module);
+        entity.setOperation(operation);
+        entity.setTargetId(targetId);
+        entity.setTargetNo(targetNo);
+        entity.setOperator(operator);
+        entity.setDetail(writeDetail(detail));
+        save(entity);
+    }
+
+    private String writeDetail(Object detail) {
+        if (detail == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(detail);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("审计详情序列化失败", e);
         }
     }
 

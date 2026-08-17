@@ -3,17 +3,19 @@ package com.by.ximu.inventory.module.inbound;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.by.ximu.common.Auths;
+import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
+import com.by.ximu.common.Role;
+import com.by.ximu.inventory.module.log.OperationLogService;
 import com.by.ximu.inventory.module.stock.StockOperationService;
-import com.by.ximu.inventory.util.DocNoGenerator;
+import com.by.ximu.inventory.util.DocNoSequenceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -33,12 +35,11 @@ import java.util.stream.Collectors;
 public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
 
     private static final String PREFIX = "IN";
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
-    /** 单号生成单机并发锁 */
-    private static final Object DOCNO_LOCK = new Object();
 
     private final InboundItemMapper inboundItemMapper;
     private final StockOperationService stockOperationService;
+    private final OperationLogService operationLogService;
+    private final DocNoSequenceService docNoSequenceService;
 
     /**
      * 分页查询（支持按状态/入库类型筛选 + keyword 模糊搜索单号/来源单号）。
@@ -73,6 +74,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
      */
     @Transactional
     public InboundDetailVO create(InboundCreateRequest req) {
+        Auths.requireRole(Role.CREATOR, Role.ADMIN);
         // 1. 单号：不传则生成，传了则校验唯一（唯一索引兜底）
         String docNo = req.getInboundNo();
         if (!StringUtils.hasText(docNo)) {
@@ -90,6 +92,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         head.setChecker(req.getChecker());
         head.setAuditLevel(req.getAuditLevel());
         head.setStatus("CREATED");
+        head.setCreatedBy(OperatorContext.getOperatorId());
         save(head);
         // 4. 保存明细
         if (items != null) {
@@ -99,6 +102,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
                 inboundItemMapper.insert(it);
             }
         }
+        operationLogService.recordInTx("inbound", "CREATE", head.getId(), head.getInboundNo(), OperatorContext.getOperatorName(), req);
         return toVo(head, items);
     }
 
@@ -111,12 +115,16 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         if (inbound == null) {
             throw new IllegalArgumentException("入库单不存在: " + id);
         }
+        Auths.requireRole(Role.APPROVER, Role.ADMIN);
+        Auths.requireNotSelfOrAdmin(inbound.getCreatedBy());
         if (!"CREATED".equals(inbound.getStatus())) {
             throw new IllegalStateException("当前状态[" + inbound.getStatus() + "]不允许批准，仅 CREATED 状态可批准");
         }
         inbound.setStatus("APPROVED");
         inbound.setAuditLevel(auditLevel);
         updateById(inbound);
+        operationLogService.recordInTx("inbound", "APPROVE", id, inbound.getInboundNo(), OperatorContext.getOperatorName(),
+                Map.of("auditLevel", auditLevel == null ? "" : auditLevel));
     }
 
     /**
@@ -128,6 +136,8 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         if (inbound == null) {
             throw new IllegalArgumentException("入库单不存在: " + id);
         }
+        Auths.requireRole(Role.CHECKER, Role.ADMIN);
+        Auths.requireNotSelfOrAdmin(inbound.getCreatedBy());
         if (!"APPROVED".equals(inbound.getStatus())) {
             throw new IllegalStateException("当前状态[" + inbound.getStatus() + "]不允许审核，仅 APPROVED 状态可审核");
         }
@@ -139,6 +149,8 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
             BigDecimal qty = it.getSettleQty() != null ? it.getSettleQty() : it.getQty();
             stockOperationService.increaseStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getSpec(), qty);
         }
+        operationLogService.recordInTx("inbound", "CHECK", id, inbound.getInboundNo(), OperatorContext.getOperatorName(),
+                Map.of("checker", checker == null ? "" : checker));
     }
 
     /**
@@ -153,8 +165,49 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         if (head != null && !"CREATED".equals(head.getStatus())) {
             throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
         }
+        if (head != null) {
+            Auths.requireCreatorOrAdmin(head.getCreatedBy());
+        }
         inboundItemMapper.delete(new LambdaQueryWrapper<InboundItem>().eq(InboundItem::getInboundId, id));
         removeById(id);
+        if (head != null) {
+            operationLogService.recordInTx("inbound", "DELETE", id, head.getInboundNo(), OperatorContext.getOperatorName(), null);
+        }
+    }
+
+    /**
+     * 编辑入库单头（白名单字段）：仅本人 CREATED 单据可编辑（ADMIN 不限）。
+     *
+     * <p>请求经 {@link InboundUpdateRequest} 白名单绑定，{@code id/status/version/createdBy/时间戳} 不可经此修改；
+     * 部分更新语义：DTO 字段为 null 表示保持原值。
+     * <p>编辑与审计同事务；乐观锁冲突时抛异常提示刷新重试。
+     */
+    @Transactional
+    public void updateHead(Long id, InboundUpdateRequest req) {
+        Inbound existed = getById(id);
+        if (existed == null) {
+            throw new IllegalArgumentException("入库单不存在: " + id);
+        }
+        if (!"CREATED".equals(existed.getStatus())) {
+            throw new IllegalStateException("仅 CREATED 状态可编辑");
+        }
+        Auths.requireCreatorOrAdmin(existed.getCreatedBy());
+        if (req.getInboundType() != null) {
+            existed.setInboundType(req.getInboundType());
+        }
+        if (req.getSourceOrderNo() != null) {
+            existed.setSourceOrderNo(req.getSourceOrderNo());
+        }
+        if (req.getChecker() != null) {
+            existed.setChecker(req.getChecker());
+        }
+        if (req.getAuditLevel() != null) {
+            existed.setAuditLevel(req.getAuditLevel());
+        }
+        if (!updateById(existed)) {
+            throw new IllegalStateException("并发冲突，单据已被他人修改，请刷新后重试");
+        }
+        operationLogService.recordInTx("inbound", "UPDATE", id, existed.getInboundNo(), OperatorContext.getOperatorName(), req);
     }
 
     /** 查询头 + 明细，组装 VO（GET /{id}） */
@@ -234,20 +287,9 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    /** 单机并发安全生成当天单号（查询当天最大序号 + 1，唯一索引兜底） */
+    /** 生成当天入库单号（DB 原子取号，多实例安全） */
     private String nextDocNo() {
-        synchronized (DOCNO_LOCK) {
-            List<Inbound> todays = list(new LambdaQueryWrapper<Inbound>()
-                    .likeRight(Inbound::getInboundNo, PREFIX + today())
-                    .select(Inbound::getInboundNo));
-            List<String> nos = todays.stream().map(Inbound::getInboundNo).collect(Collectors.toList());
-            long maxSeq = DocNoGenerator.maxSeqOf(nos, PREFIX.length());
-            return DocNoGenerator.generate(PREFIX, maxSeq);
-        }
-    }
-
-    private static String today() {
-        return LocalDate.now().format(DATE_FMT);
+        return docNoSequenceService.next(PREFIX);
     }
 
     private Page<Inbound> buildPage(PageQuery query) {
