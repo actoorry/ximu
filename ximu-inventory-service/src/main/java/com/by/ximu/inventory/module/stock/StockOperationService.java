@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 /**
  * 库存联动服务：出入库/盘点流转到终态时按 {@code org_id + product_name + spec + grade} 四维联动 {@code inventory_stock}。
@@ -145,6 +146,7 @@ public class StockOperationService {
         stock.setTransitQty(BigDecimal.ZERO);
         stock.setStockAge(DEFAULT_STOCK_AGE);
         stock.setAgeWarnDays(DEFAULT_AGE_WARN_DAYS);
+        stock.setFirstInboundAt(LocalDateTime.now());
         return stock;
     }
 }
