@@ -1,5 +1,6 @@
 package com.by.ximu.inventory.config;
 
+import com.by.ximu.common.ForbiddenException;
 import com.by.ximu.common.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.BindException;
@@ -15,6 +16,13 @@ import java.util.stream.Collectors;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /** 越权/职责分离冲突 → 403 */
+    @ExceptionHandler(ForbiddenException.class)
+    public Result<Void> handleForbidden(ForbiddenException e) {
+        log.warn("越权操作: {}", e.getMessage());
+        return Result.error(403, e.getMessage());
+    }
 
     /** 状态机非法迁移（流转前置校验失败）→ code=1 业务失败，非 500 系统错误 */
     @ExceptionHandler(IllegalStateException.class)

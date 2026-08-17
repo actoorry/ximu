@@ -1,5 +1,6 @@
 package com.by.ximu.safestock.config;
 
+import com.by.ximu.common.ForbiddenException;
 import com.by.ximu.common.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.BindException;
@@ -15,6 +16,13 @@ import java.util.stream.Collectors;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /** 越权操作 → 403 */
+    @ExceptionHandler(ForbiddenException.class)
+    public Result<Void> handleForbidden(ForbiddenException e) {
+        log.warn("越权操作: {}", e.getMessage());
+        return Result.error(403, e.getMessage());
+    }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public Result<Void> handleIllegalArg(IllegalArgumentException e) {
