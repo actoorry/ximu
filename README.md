@@ -84,9 +84,10 @@ java -jar ximu-safe-stock-service/target/ximu-safe-stock-service-1.0-SNAPSHOT.ja
 | DB_USERNAME | 数据库账号 | ximu_app | 生产必须（prod 无默认值） |
 | DB_PASSWORD | 数据库密码 | （强随机密码） | 生产必须（prod 无默认值） |
 | JWT_SECRET | JWT 签名密钥（仅网关使用） | （>=32 字节随机串） | 生产必须（网关默认值仅本地开发兜底） |
+| GATEWAY_TOKEN | 网关与下游服务的内部共享令牌（防直连伪造身份） | （随机串，网关与两业务服务一致） | 生产必须（prod 无默认值） |
 | CORS_ORIGINS | 允许的前端来源，逗号分隔多个域名 | https://erp.example.com,https://admin.example.com | 生产必须（prod 无默认值） |
 
-> 说明：`JWT_SECRET` 必须是 >=32 字节随机串（HS256 密钥），可用 `openssl rand -base64 48` 生成。生产激活 `application-prod.yml` 后，`DB_URL` / `DB_USERNAME` / `DB_PASSWORD` / `CORS_ORIGINS` 均无默认值，缺失即启动失败。
+> 说明：`JWT_SECRET` 必须是 >=32 字节随机串（HS256 密钥），可用 `openssl rand -base64 48` 生成。`GATEWAY_TOKEN` 是网关与两业务服务共享的内部令牌，网关校验 JWT 后注入 `X-Gateway-Token` 头，下游据此确认请求确经网关。生产激活 `application-prod.yml` 后，`DB_URL` / `DB_USERNAME` / `DB_PASSWORD` / `CORS_ORIGINS` / `JWT_SECRET` / `GATEWAY_TOKEN` 均无默认值，缺失即启动失败。
 
 ### 启动顺序
 
@@ -127,8 +128,16 @@ java -jar ximu-gateway/target/ximu-gateway-1.0-SNAPSHOT.jar
 两个业务服务只信任网关注入的身份头 X-User-Id / X-User-Name / X-User-Roles，自身不内置认证，因此生产必须：
 
 - 将 8081 / 8082 两个业务服务网络隔离在网关之后（防火墙 / 安全组只放行 8080，不对外暴露 8081 / 8082）。
+- 设置 `GATEWAY_TOKEN`（网关注入 X-Gateway-Token 头、下游校验），作为网络隔离之外的代码层兜底：直连伪造 X-User-* 但无正确网关令牌的请求会被 401 拒绝。
 - 严禁客户端绕过网关直连业务服务，否则攻击者可伪造 X-User-* 头冒充任意用户，认证形同虚设。
 - 保持各服务 `app.auth.enabled: true`（默认即如此），仅本地开发可临时关闭。
+
+### 幂等提交（防重复建单）
+
+四张单据（入库/出库/盘点/调拨）的创建接口支持可选幂等键 `requestId`：
+
+- 生产前端**必须**为每次创建请求生成唯一 `requestId`（如 UUID），网络重试/双击时复用同一值，服务端命中唯一索引即返回已建单据、不重复建单。
+- `requestId` 不传时兼容旧客户端，但此时服务端无法区分「重试」与「合法重复建单」，双击/重试仍会重复建单。
 
 ## 目录结构
 

@@ -1,5 +1,6 @@
 package com.by.ximu.inventory.module.stock;
 
+import com.by.ximu.inventory.module.log.OperationLogService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -32,6 +33,9 @@ class StockOperationServiceTest {
     @Mock
     private InventoryStockMapper inventoryStockMapper;
 
+    @Mock
+    private OperationLogService operationLogService;
+
     @InjectMocks
     private StockOperationService stockOperationService;
 
@@ -53,7 +57,7 @@ class StockOperationServiceTest {
     void increase_无匹配行_新建并归一spec与grade_且firstInboundAt非空() {
         when(inventoryStockMapper.selectOne(any())).thenReturn(null);
 
-        InventoryStock result = stockOperationService.increaseStock(1L, null, "苹果", null, new BigDecimal("10"));
+        InventoryStock result = stockOperationService.increaseStock(1L, null, "苹果", null, null, new BigDecimal("10"));
 
         assertNotNull(result);
         assertNull(result.getId());
@@ -73,7 +77,7 @@ class StockOperationServiceTest {
     void increase_非空spec与grade_原样保留() {
         when(inventoryStockMapper.selectOne(any())).thenReturn(null);
 
-        InventoryStock result = stockOperationService.increaseStock(1L, "A级", "苹果", "大", new BigDecimal("10"));
+        InventoryStock result = stockOperationService.increaseStock(1L, "A级", "苹果", null, "大", new BigDecimal("10"));
 
         assertEquals("A级", result.getGrade());
         assertEquals("大", result.getSpec());
@@ -86,7 +90,7 @@ class StockOperationServiceTest {
         when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
         when(inventoryStockMapper.updateById(existing)).thenReturn(1);
 
-        InventoryStock result = stockOperationService.increaseStock(1L, "A级", "苹果", "大", new BigDecimal("3"));
+        InventoryStock result = stockOperationService.increaseStock(1L, "A级", "苹果", null, "大", new BigDecimal("3"));
 
         assertSame(existing, result);
         assertEquals(0, result.getActualQty().compareTo(new BigDecimal("8")));
@@ -100,7 +104,7 @@ class StockOperationServiceTest {
         when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
         when(inventoryStockMapper.updateById(existing)).thenReturn(1);
 
-        InventoryStock result = stockOperationService.increaseStock(1L, null, "苹果", null, new BigDecimal("3"));
+        InventoryStock result = stockOperationService.increaseStock(1L, null, "苹果", null, null, new BigDecimal("3"));
 
         assertEquals(0, result.getActualQty().compareTo(new BigDecimal("3")));
     }
@@ -108,26 +112,26 @@ class StockOperationServiceTest {
     @Test
     void increase_数量为负数_拒绝() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> stockOperationService.increaseStock(1L, null, "苹果", null, new BigDecimal("-1")));
+                () -> stockOperationService.increaseStock(1L, null, "苹果", null, null, new BigDecimal("-1")));
         assertTrue(ex.getMessage().contains("入库数量必须为正数"));
     }
 
     @Test
     void increase_数量为0_返回null且不操作库() {
-        assertNull(stockOperationService.increaseStock(1L, null, "苹果", null, BigDecimal.ZERO));
+        assertNull(stockOperationService.increaseStock(1L, null, "苹果", null, null, BigDecimal.ZERO));
         verifyNoInteractions(inventoryStockMapper);
     }
 
     @Test
     void increase_数量为null_返回null且不操作库() {
-        assertNull(stockOperationService.increaseStock(1L, null, "苹果", null, null));
+        assertNull(stockOperationService.increaseStock(1L, null, "苹果", null, null, null));
         verifyNoInteractions(inventoryStockMapper);
     }
 
     @Test
     void increase_orgId为null_拒绝() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> stockOperationService.increaseStock(null, null, "苹果", null, new BigDecimal("1")));
+                () -> stockOperationService.increaseStock(null, null, "苹果", null, null, new BigDecimal("1")));
         assertTrue(ex.getMessage().contains("组织"));
         verifyNoInteractions(inventoryStockMapper);
     }
@@ -135,7 +139,7 @@ class StockOperationServiceTest {
     @Test
     void increase_品名为空_拒绝() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> stockOperationService.increaseStock(1L, null, "  ", null, new BigDecimal("1")));
+                () -> stockOperationService.increaseStock(1L, null, "  ", null, null, new BigDecimal("1")));
         assertTrue(ex.getMessage().contains("品名"));
         verifyNoInteractions(inventoryStockMapper);
     }
@@ -148,7 +152,7 @@ class StockOperationServiceTest {
         when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> stockOperationService.decreaseStock(1L, null, "苹果", "大", new BigDecimal("5")));
+                () -> stockOperationService.decreaseStock(1L, null, "苹果", null, "大", new BigDecimal("5")));
 
         assertTrue(ex.getMessage().contains("苹果"));
         assertTrue(ex.getMessage().contains("/大"));
@@ -161,7 +165,7 @@ class StockOperationServiceTest {
         when(inventoryStockMapper.selectOne(any())).thenReturn(null);
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> stockOperationService.decreaseStock(1L, null, "苹果", null, new BigDecimal("1")));
+                () -> stockOperationService.decreaseStock(1L, null, "苹果", null, null, new BigDecimal("1")));
 
         assertTrue(ex.getMessage().contains("当前库存 0"));
         assertTrue(ex.getMessage().contains("苹果"));
@@ -173,7 +177,7 @@ class StockOperationServiceTest {
         when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
         when(inventoryStockMapper.updateById(existing)).thenReturn(1);
 
-        InventoryStock result = stockOperationService.decreaseStock(1L, null, "苹果", null, new BigDecimal("4"));
+        InventoryStock result = stockOperationService.decreaseStock(1L, null, "苹果", null, null, new BigDecimal("4"));
 
         assertSame(existing, result);
         assertEquals(0, result.getActualQty().compareTo(new BigDecimal("6")));
@@ -184,14 +188,14 @@ class StockOperationServiceTest {
     @Test
     void decrease_数量为负数_拒绝() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> stockOperationService.decreaseStock(1L, null, "苹果", null, new BigDecimal("-1")));
+                () -> stockOperationService.decreaseStock(1L, null, "苹果", null, null, new BigDecimal("-1")));
         assertTrue(ex.getMessage().contains("出库数量必须为正数"));
     }
 
     @Test
     void decrease_数量为0或null_返回null且不操作库() {
-        assertNull(stockOperationService.decreaseStock(1L, null, "苹果", null, BigDecimal.ZERO));
-        assertNull(stockOperationService.decreaseStock(1L, null, "苹果", null, null));
+        assertNull(stockOperationService.decreaseStock(1L, null, "苹果", null, null, BigDecimal.ZERO));
+        assertNull(stockOperationService.decreaseStock(1L, null, "苹果", null, null, null));
         verifyNoInteractions(inventoryStockMapper);
     }
 
@@ -203,7 +207,7 @@ class StockOperationServiceTest {
         when(inventoryStockMapper.selectOne(any())).thenReturn(existing);
         when(inventoryStockMapper.updateById(existing)).thenReturn(1);
 
-        InventoryStock result = stockOperationService.adjustStock(1L, null, "苹果", null, new BigDecimal("3"));
+        InventoryStock result = stockOperationService.adjustStock(1L, null, "苹果", null, null, new BigDecimal("3"));
 
         assertSame(existing, result);
         assertEquals(0, result.getActualQty().compareTo(new BigDecimal("3")));
@@ -215,7 +219,7 @@ class StockOperationServiceTest {
     void adjust_无匹配行_新建() {
         when(inventoryStockMapper.selectOne(any())).thenReturn(null);
 
-        InventoryStock result = stockOperationService.adjustStock(1L, "B级", "苹果", "大", new BigDecimal("7"));
+        InventoryStock result = stockOperationService.adjustStock(1L, "B级", "苹果", null, "大", new BigDecimal("7"));
 
         assertNotNull(result);
         assertEquals("B级", result.getGrade());
@@ -229,7 +233,7 @@ class StockOperationServiceTest {
     void adjust_实盘数量为0_新建零库存行() {
         when(inventoryStockMapper.selectOne(any())).thenReturn(null);
 
-        InventoryStock result = stockOperationService.adjustStock(1L, null, "苹果", null, BigDecimal.ZERO);
+        InventoryStock result = stockOperationService.adjustStock(1L, null, "苹果", null, null, BigDecimal.ZERO);
 
         assertNotNull(result);
         assertEquals(0, result.getActualQty().compareTo(BigDecimal.ZERO));
@@ -239,20 +243,20 @@ class StockOperationServiceTest {
     @Test
     void adjust_实盘数量为负数_拒绝() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> stockOperationService.adjustStock(1L, null, "苹果", null, new BigDecimal("-1")));
+                () -> stockOperationService.adjustStock(1L, null, "苹果", null, null, new BigDecimal("-1")));
         assertTrue(ex.getMessage().contains("盘点实盘数量不能为负"));
     }
 
     @Test
     void adjust_实盘数量为null_返回null且不操作库() {
-        assertNull(stockOperationService.adjustStock(1L, null, "苹果", null, null));
+        assertNull(stockOperationService.adjustStock(1L, null, "苹果", null, null, null));
         verifyNoInteractions(inventoryStockMapper);
     }
 
     @Test
     void adjust_orgId为null_拒绝() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> stockOperationService.adjustStock(null, null, "苹果", null, new BigDecimal("1")));
+                () -> stockOperationService.adjustStock(null, null, "苹果", null, null, new BigDecimal("1")));
         assertTrue(ex.getMessage().contains("组织"));
         verifyNoInteractions(inventoryStockMapper);
     }
@@ -260,7 +264,7 @@ class StockOperationServiceTest {
     @Test
     void adjust_品名为空_拒绝() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> stockOperationService.adjustStock(1L, null, "", null, new BigDecimal("1")));
+                () -> stockOperationService.adjustStock(1L, null, "", null, null, new BigDecimal("1")));
         assertTrue(ex.getMessage().contains("品名"));
         verifyNoInteractions(inventoryStockMapper);
     }
@@ -274,7 +278,7 @@ class StockOperationServiceTest {
         when(inventoryStockMapper.updateById(existing)).thenReturn(0);
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> stockOperationService.increaseStock(1L, null, "苹果", null, new BigDecimal("3")));
+                () -> stockOperationService.increaseStock(1L, null, "苹果", null, null, new BigDecimal("3")));
         assertTrue(ex.getMessage().contains("并发冲突"));
     }
 
@@ -285,7 +289,7 @@ class StockOperationServiceTest {
         when(inventoryStockMapper.updateById(existing)).thenReturn(0);
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> stockOperationService.decreaseStock(1L, null, "苹果", null, new BigDecimal("8")));
+                () -> stockOperationService.decreaseStock(1L, null, "苹果", null, null, new BigDecimal("8")));
         assertTrue(ex.getMessage().contains("并发冲突"));
         assertTrue(ex.getMessage().contains("出库"));
     }
@@ -297,7 +301,7 @@ class StockOperationServiceTest {
         when(inventoryStockMapper.updateById(existing)).thenReturn(0);
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> stockOperationService.adjustStock(1L, null, "苹果", null, new BigDecimal("3")));
+                () -> stockOperationService.adjustStock(1L, null, "苹果", null, null, new BigDecimal("3")));
         assertTrue(ex.getMessage().contains("并发冲突"));
     }
 }

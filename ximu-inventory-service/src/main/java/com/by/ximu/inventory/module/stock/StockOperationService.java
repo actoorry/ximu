@@ -1,6 +1,8 @@
 package com.by.ximu.inventory.module.stock;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.by.ximu.common.OperatorContext;
+import com.by.ximu.inventory.module.log.OperationLogService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -8,6 +10,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * 库存联动服务：出入库/盘点流转到终态时按 {@code org_id + product_name + spec + grade} 四维联动 {@code inventory_stock}。
@@ -16,7 +19,7 @@ import java.time.LocalDateTime;
  * 由调用方（inbound.check / outbound.approve / check.check）保证「状态流转 + 库存联动」在同一事务内，
  * 任一步失败整体回滚，避免单据与库存不一致。
  *
- * <p>匹配规则：{@code org_id + product_name + spec + grade} 四维精确匹配；spec/grade 缺省（null）归一为空串。
+ * <p>匹配规则：{@code org_id + product_name + material + spec + grade} 五维精确匹配；material/spec/grade 缺省（null）归一为空串。
  * 命中既有行则用 {@code @Version} 乐观锁更新；未命中则按入库/盘点语义新建一行。
  */
 @Service
@@ -24,6 +27,7 @@ import java.time.LocalDateTime;
 public class StockOperationService {
 
     private final InventoryStockMapper inventoryStockMapper;
+    private final OperationLogService operationLogService;
 
     /** 新建库存行时的默认库龄与预警阈值 */
     private static final int DEFAULT_STOCK_AGE = 0;
@@ -35,7 +39,7 @@ public class StockOperationService {
      * @return 被更新的库存行（qty 为 0 或 null 时返回 null，不产生库存变化）
      */
     @Transactional
-    public InventoryStock increaseStock(Long orgId, String grade, String productName, String spec, BigDecimal qty) {
+    public InventoryStock increaseStock(Long orgId, String grade, String productName, String material, String spec, BigDecimal qty) {
         requireOrg(orgId);
         requireProduct(productName);
         if (qty == null || qty.compareTo(BigDecimal.ZERO) == 0) {
@@ -44,9 +48,9 @@ public class StockOperationService {
         if (qty.signum() < 0) {
             throw new IllegalArgumentException("入库数量必须为正数: " + qty);
         }
-        InventoryStock stock = findStock(orgId, grade, productName, spec);
+        InventoryStock stock = findStock(orgId, grade, productName, material, spec);
         if (stock == null) {
-            stock = newStock(orgId, grade, productName, spec, qty);
+            stock = newStock(orgId, grade, productName, material, spec, qty);
             inventoryStockMapper.insert(stock);
         } else {
             BigDecimal now = stock.getActualQty() == null ? BigDecimal.ZERO : stock.getActualQty();
@@ -64,7 +68,7 @@ public class StockOperationService {
      * @return 被更新的库存行（qty 为 0 或 null 时返回 null，不产生库存变化）
      */
     @Transactional
-    public InventoryStock decreaseStock(Long orgId, String grade, String productName, String spec, BigDecimal qty) {
+    public InventoryStock decreaseStock(Long orgId, String grade, String productName, String material, String spec, BigDecimal qty) {
         requireOrg(orgId);
         requireProduct(productName);
         if (qty == null || qty.compareTo(BigDecimal.ZERO) == 0) {
@@ -73,7 +77,7 @@ public class StockOperationService {
         if (qty.signum() < 0) {
             throw new IllegalArgumentException("出库数量必须为正数: " + qty);
         }
-        InventoryStock stock = findStock(orgId, grade, productName, spec);
+        InventoryStock stock = findStock(orgId, grade, productName, material, spec);
         BigDecimal available = stock == null || stock.getActualQty() == null
                 ? BigDecimal.ZERO : stock.getActualQty();
         if (available.compareTo(qty) < 0) {
@@ -96,7 +100,7 @@ public class StockOperationService {
      * @return 被更新的库存行（actualQty 为 null 时返回 null，不产生库存变化）
      */
     @Transactional
-    public InventoryStock adjustStock(Long orgId, String grade, String productName, String spec, BigDecimal actualQty) {
+    public InventoryStock adjustStock(Long orgId, String grade, String productName, String material, String spec, BigDecimal actualQty) {
         requireOrg(orgId);
         requireProduct(productName);
         if (actualQty == null) {
@@ -105,14 +109,22 @@ public class StockOperationService {
         if (actualQty.signum() < 0) {
             throw new IllegalArgumentException("盘点实盘数量不能为负: " + actualQty);
         }
-        InventoryStock stock = findStock(orgId, grade, productName, spec);
+        InventoryStock stock = findStock(orgId, grade, productName, material, spec);
         if (stock == null) {
-            stock = newStock(orgId, grade, productName, spec, actualQty);
+            stock = newStock(orgId, grade, productName, material, spec, actualQty);
             inventoryStockMapper.insert(stock);
         } else {
+            BigDecimal before = stock.getActualQty() == null ? BigDecimal.ZERO : stock.getActualQty();
             stock.setActualQty(actualQty);
             if (inventoryStockMapper.updateById(stock) == 0) {
                 throw new IllegalStateException("库存并发冲突，请重试（盘点）");
+            }
+            // 盘盈盘亏流水：账面与实盘差异落审计（正值盘盈、负值盘亏）
+            BigDecimal diff = actualQty.subtract(before);
+            if (diff.signum() != 0) {
+                operationLogService.recordInTx("stock", "ADJUST", stock.getId(), productName,
+                        OperatorContext.getOperatorName(),
+                        Map.of("before", before, "after", actualQty, "diff", diff));
             }
         }
         return stock;
@@ -132,11 +144,12 @@ public class StockOperationService {
         }
     }
 
-    /** 按 org_id + product_name + spec + grade 四维精确匹配单行库存（spec/grade 缺省归一为空串） */
-    private InventoryStock findStock(Long orgId, String grade, String productName, String spec) {
+    /** 按 org_id + product_name + material + spec + grade 五维精确匹配单行库存（material/spec/grade 缺省归一为空串） */
+    private InventoryStock findStock(Long orgId, String grade, String productName, String material, String spec) {
         LambdaQueryWrapper<InventoryStock> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(InventoryStock::getOrgId, orgId);
         wrapper.eq(InventoryStock::getProductName, productName);
+        wrapper.eq(InventoryStock::getMaterial, material == null ? "" : material);
         wrapper.eq(InventoryStock::getSpec, spec == null ? "" : spec);
         wrapper.eq(InventoryStock::getGrade, grade == null ? "" : grade);
         wrapper.last("LIMIT 1");
@@ -144,10 +157,11 @@ public class StockOperationService {
     }
 
     /** 构造一条新建库存行（spec/grade 缺省归一为空串，其余走表默认值或业务默认值） */
-    private InventoryStock newStock(Long orgId, String grade, String productName, String spec, BigDecimal actualQty) {
+    private InventoryStock newStock(Long orgId, String grade, String productName, String material, String spec, BigDecimal actualQty) {
         InventoryStock stock = new InventoryStock();
         stock.setOrgId(orgId);
         stock.setProductName(productName);
+        stock.setMaterial(material == null ? "" : material);
         stock.setSpec(spec == null ? "" : spec);
         stock.setGrade(grade == null ? "" : grade);
         stock.setActualQty(actualQty);

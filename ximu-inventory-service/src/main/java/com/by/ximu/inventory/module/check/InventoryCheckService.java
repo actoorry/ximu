@@ -157,7 +157,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         }
         // 库存联动：按明细逐行校正到实盘数量
         for (CheckItem it : listItems(id)) {
-            stockOperationService.adjustStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getSpec(), it.getActualQty());
+            stockOperationService.adjustStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getMaterial(), it.getSpec(), it.getActualQty());
         }
         operationLogService.recordInTx("check", "CHECK", id, check.getCheckNo(), OperatorContext.getOperatorName(), null);
     }
@@ -234,6 +234,9 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
     private List<CheckItem> normalizeItems(CheckCreateRequest req) {
         List<CheckItem> items = req.getItems();
         if ((items == null || items.isEmpty()) && req.getActualQty() != null) {
+            if (req.getOrgId() == null) {
+                throw new IllegalArgumentException("组织(orgId)不能为空");
+            }
             CheckItem single = new CheckItem();
             single.setOrgId(req.getOrgId());
             single.setProductName(req.getProductName());

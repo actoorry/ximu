@@ -50,8 +50,8 @@ CREATE TABLE IF NOT EXISTS inventory_outbound (
     sale_order_no VARCHAR(64) DEFAULT NULL,
     freight_bearer VARCHAR(20) DEFAULT NULL COMMENT '博宇承担/对方承担',
     carrier VARCHAR(64) DEFAULT NULL,
-    plate_no VARCHAR(7) DEFAULT NULL,
-    driver VARCHAR(5) DEFAULT NULL,
+    plate_no VARCHAR(16) DEFAULT NULL,
+    driver VARCHAR(32) DEFAULT NULL,
     driver_phone VARCHAR(11) DEFAULT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'CREATED' COMMENT 'CREATED/APPROVED',
     created_by BIGINT NOT NULL COMMENT '制单人ID',
@@ -156,8 +156,9 @@ CREATE TABLE IF NOT EXISTS inventory_stock (
     grade VARCHAR(32) NOT NULL DEFAULT '',
     spec VARCHAR(64) NOT NULL DEFAULT '',
     org_id BIGINT NOT NULL,
-    actual_qty DECIMAL(18,4) DEFAULT NULL,
-    transit_qty DECIMAL(18,4) DEFAULT NULL,
+    material VARCHAR(128) NOT NULL DEFAULT '' COMMENT '物料/材质（库存五维之一）',
+    actual_qty DECIMAL(18,4) NOT NULL DEFAULT 0 COMMENT '实际库存（账本，非负）',
+    transit_qty DECIMAL(18,4) NOT NULL DEFAULT 0 COMMENT '在途数量（非负）',
     stock_age INT DEFAULT 0 COMMENT '库龄（天）',
     age_warn_days INT DEFAULT 15 COMMENT '库龄预警阈值（天）',
     first_inbound_at DATETIME NULL COMMENT '首次入库时间（库龄计算用）',
@@ -165,7 +166,8 @@ CREATE TABLE IF NOT EXISTS inventory_stock (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_stock_dims (org_id, product_name, spec, grade)
+    UNIQUE KEY uk_stock_dims (org_id, product_name, material, spec, grade),
+    CONSTRAINT chk_stock_qty_nonneg CHECK (actual_qty >= 0 AND transit_qty >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 6. 批号管理

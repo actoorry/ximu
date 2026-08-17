@@ -28,6 +28,9 @@ public class InventoryStock {
 
     private String grade;
 
+    /** 物料/材质（库存五维之一，缺省空串参与匹配） */
+    private String material;
+
     private String spec;
 
     private Long orgId;

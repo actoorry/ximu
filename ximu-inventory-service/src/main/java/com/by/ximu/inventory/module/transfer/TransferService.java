@@ -232,6 +232,9 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
                 || req.getQty() != null
                 || StringUtils.hasText(req.getTargetLocation());
         if ((items == null || items.isEmpty()) && hasLegacy) {
+            if (req.getOrgId() == null) {
+                throw new IllegalArgumentException("组织(orgId)不能为空");
+            }
             TransferItem single = new TransferItem();
             single.setOrgId(req.getOrgId());
             single.setProductName(req.getProductName());

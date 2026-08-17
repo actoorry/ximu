@@ -180,6 +180,17 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - P1-2 safe-stock 预警/补货未实现：砍掉定位——safe-stock 降级为「安全库存参数配置维护（仅 CRUD）」，更新 pom/Application/OpenApiConfig/CLAUDE/README/ARCHITECTURE/PLAN 7 处宣称（字段保留）
 - 验证：5 模块编译通过 + 全量 82 测试全绿
 
+### P2 完善项修复（✅ 2026-08-17，组长执行，外部审计触发）
+- 全部 7 项核实属实；修复 6 项，P2-4 待架构决策（见下）
+- P2-1 库存唯一键五维化：InventoryStock 加 material 字段，uk_stock_dims 改 (org_id, product_name, material, spec, grade)，findStock/newStock/3 个联动方法签名加 material（V5 迁移）
+- P2-2 数量 NOT NULL + CHECK 非负：actual_qty/transit_qty 改 NOT NULL DEFAULT 0 + CHECK(>=0)（V4 迁移，存量 NULL 回填 0）
+- P2-3 盘点盘盈盘亏流水：adjustStock 命中既有行且差异非零时 recordInTx 记录 before/after/diff
+- P2-5 字段加长：plate_no VARCHAR(16)、driver VARCHAR(32)（V4 迁移）
+- P2-6 幂等 requestId：README 明确生产前端必须传（服务端无法区分重试与合法重复建单，保持可选兼容）
+- P2-7 兼容字段校验：四个 normalizeItems 兼容分支补 orgId 非空校验
+- P2-4 调拨不联动库存：确认为设计约束（stock 无库位维度，类注释已说明），非 bug；真正修复需给库存加库位维度（架构改造，待用户拍板）
+- 验证：5 模块编译通过 + 全量 82 测试全绿
+
 ### 首次启动冒烟（✅ 2026-08-17，组长执行）
 - **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
 - 接口冒烟全通过：health=UP；无身份头 → HTTP 401（RBAC 拦截）；带 ADMIN 头列表 → 200 + V1 种子数据；POST 建单 → `IN20260817001`（原子取号真机工作）+ 库存联动建行 + 库龄预警真实触发（电解铜 16 天>15 阈值 warn=true）

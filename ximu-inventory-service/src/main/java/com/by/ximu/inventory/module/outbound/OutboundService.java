@@ -139,7 +139,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
         }
         // 库存联动：按明细逐行扣减
         for (OutboundItem it : listItems(id)) {
-            stockOperationService.decreaseStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getSpec(), it.getQty());
+            stockOperationService.decreaseStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getMaterial(), it.getSpec(), it.getQty());
         }
         operationLogService.recordInTx("outbound", "APPROVE", id, outbound.getOutboundNo(), OperatorContext.getOperatorName(), null);
     }
@@ -230,6 +230,9 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
     private List<OutboundItem> normalizeItems(OutboundCreateRequest req) {
         List<OutboundItem> items = req.getItems();
         if ((items == null || items.isEmpty()) && StringUtils.hasText(req.getProductName())) {
+            if (req.getOrgId() == null) {
+                throw new IllegalArgumentException("组织(orgId)不能为空");
+            }
             OutboundItem single = new OutboundItem();
             single.setOrgId(req.getOrgId());
             single.setProductName(req.getProductName());
