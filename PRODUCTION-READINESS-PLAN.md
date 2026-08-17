@@ -206,6 +206,11 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 验证结果：负值 -5 归零、NULL 回填 0、material 五维唯一键(org_id,product_name,material,spec,grade)、CHECK 约束 chk_stock_qty_nonneg、inventory_safe_stock 表存在；正常数据(3000/900/700/500/100)原样保留
 - 结论：V2~V5 增量迁移在「旧库带数据」场景下可顺利跑通，含 R3 的负值/NULL 自愈
 
+### 完整建库脚本（✅ 2026-08-17，组长执行）
+- 新增 data/ximu_init.sql：合并 V1~V5 最终 schema + 全部种子，含 CREATE DATABASE/USE + 破坏性警告（勿对已有数据库执行）
+- 真机验证（独立库 ximu_init_test）：31 条语句执行成功，13 张表 + 种子完整（inbound 2/stock 4/safe_stock 3/batch 3/log 3）+ 五维唯一键 + CHECK 约束
+- 教训：验证脚本首版写死 USE ximu 误连 dev 库，因 dev 库旧 schema 首条 INSERT 即报错中断、零污染（已核实 12 表行数与种子一致）；已改为独立库验证 + 脚本加破坏性警告
+
 ### 首次启动冒烟（✅ 2026-08-17，组长执行）
 - **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
 - 接口冒烟全通过：health=UP；无身份头 → HTTP 401（RBAC 拦截）；带 ADMIN 头列表 → 200 + V1 种子数据；POST 建单 → `IN20260817001`（原子取号真机工作）+ 库存联动建行 + 库龄预警真实触发（电解铜 16 天>15 阈值 warn=true）
