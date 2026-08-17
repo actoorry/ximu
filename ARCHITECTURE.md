@@ -127,7 +127,7 @@ public static boolean isWarn(Long stockAgeDays, Integer stockAge, Integer ageWar
    操作人从 `OperatorContext.getOperatorId() / getOperatorName()` 读取，**不信任请求体 operator**。
 3. **审计同事务**：写操作调用 `operationLogService.recordInTx(module, op, id, no, operator, detail)`（与业务同事务、失败即回滚），不要用非事务的 `record(...)`（吞异常）。
 4. **乐观锁**：实体加 `@Version private Integer version;`，DDL 带 `version INT NOT NULL DEFAULT 0`；`MybatisPlusConfig` 已注册 `OptimisticLockerInnerInterceptor`（在分页插件之前），`updateById` 返回 `false` 时抛“并发冲突”提示刷新重试。
-5. **库存四维键**：写库存统一走 `StockOperationService.increaseStock / decreaseStock / adjustStock(orgId, grade, productName, spec, qty)`，底层按 `org_id + product_name + spec + grade` 四维精确匹配（spec/grade 为 null 归一为空串），受 `inventory_stock.uk_stock_dims` 唯一索引约束。
+5. **库存五维键**：写库存统一走 `StockOperationService.increaseStock / decreaseStock / adjustStock(orgId, grade, productName, material, spec, qty)`，底层按 `org_id + product_name + material + spec + grade` 五维精确匹配（material/spec/grade 为 null 归一为空串），受 `inventory_stock.uk_stock_dims` 唯一索引约束。
 6. **DDL 变更走 V2+**：新增表 / 列在 `ximu-inventory-service/src/main/resources/db/migration/` 新增 `V2__xxx.sql`，**严禁修改已 apply 的 V1**。
 
 ## 六、开源协作约定
@@ -139,17 +139,21 @@ public static boolean isWarn(Long stockAgeDays, Integer stockAge, Integer ageWar
   mvn clean test                  # 全量测试（波次合并验收用）
   ```
 
-- **单测规模**：当前 **79 条**全绿。
+- **单测规模**：当前 **89 条**全绿。
 
   | 测试类 | 条数 |
   |--------|------|
   | `AuthsTest` | 15 |
   | `OperatorContextTest` | 17 |
   | `StockAgeTest` | 5 |
-  | `StockOperationServiceTest` | 21 |
+  | `StockOperationServiceTest` | 24 |
   | `StockWarnTest` | 7 |
   | `DocNoGeneratorTest` | 8 |
   | `DocNoSequenceServiceTest` | 6 |
+  | `InboundServiceTest` | 2 |
+  | `OutboundServiceTest` | 1 |
+  | `InventoryCheckServiceTest` | 2 |
+  | `TransferServiceTest` | 2 |
 
-- **Flyway V1 冻结纪律**：`V1__baseline_full_schema.sql` 已作为基线（与 `schema.sql` 正文逐字节一致）；**已 apply / 已 baseline 的库绝不可改 V1**（改动触发 checksum 校验失败），后续 DDL 一律新增 `V2__...`、`V3__...`。
+- **Flyway V1 冻结纪律**：`V1__baseline_full_schema.sql` 是初始基线（后续变更见 V2~V5，`schema.sql` 已演进不再与 V1 逐字节一致）；**已 apply / 已 baseline 的库绝不可改 V1**（改动触发 checksum 校验失败），后续 DDL 一律新增 `V2__...`、`V3__...`。
 - **约束继承**（与 CLAUDE.md 一致）：禁止 Docker 容器（MySQL/Redis 除外）、不引 Redis 等中间件、不内置认证、禁止 git commit（统一组长提交）、`target/` 不入库。

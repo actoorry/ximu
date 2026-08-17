@@ -1,13 +1,13 @@
 # ximu 生产就绪改造计划（Production Readiness Plan）
 
-> 状态：**进行中**。本文件记录已确认决策、改造清单、进度与验证方式，作为上线前跟踪的唯一清单。
+> 状态：**改造已完成，待上线验证**。本文件记录已确认决策、改造清单、进度与验证方式，作为上线前跟踪的唯一清单。P0/P1 全部完成，P2 除 Testcontainers 容器级并发测试（需 CI/Docker）外全部完成。
 
 ## 一、已确认决策
 
 | # | 决策点 | 结论 |
 |---|--------|------|
 | 1 | 认证方案 | **方案 A**：新增 Spring Cloud Gateway 网关统一 JWT 校验，注入 `X-User-Id` / `X-User-Name` / `X-User-Roles` 头；下游服务从服务端上下文取操作人，不信任请求体 |
-| 2 | 库存唯一维度 | **四维唯一**：`org_id + product_name + spec + grade`（明细补 `org_id` 必填、`grade` 可选，联动时 grade/spec 缺省空串匹配） |
+| 2 | 库存唯一维度 | **五维唯一**：`org_id + product_name + material + spec + grade`（P2-1 由四维演进；明细补 `org_id` 必填、`grade` 可选，联动时 material/spec/grade 缺省空串匹配） |
 | 3 | 架构定位 | **模块化、可插拔的开源项目**（用户拍板 2026-08-17）：独立部署多模块架构，不嵌入父应用；认证边缘可替换、安全库存配置服务可选装、DDL 管理可开关；详见 ARCHITECTURE.md |
 
 ## 二、改造清单与进度
@@ -32,11 +32,11 @@
 - [x] **P1-6 默认凭据移除**（波次1-B）：`application-prod.yml` 全部凭据无默认值（缺失即 `Could not resolve placeholder` 启动失败）；弱口令检测归运维侧（必设强密码）
 - [x] **P1-7 消除过度绑定**：编辑接口改白名单更新 DTO，禁止绑定 `id/version/createdAt/updatedAt/checker/status`（已落地：4 个白名单 UpdateRequest DTO 替换 convertValue(Entity)；乐观锁冲突显式报错）
 - [x] **P1-8 单号跨实例安全**（波次1-A）：`doc_no_seq` + `LAST_INSERT_ID(1)` 双分支原子取号（首插即返回 1），ConnectionCallback 同连接；取号随调用方事务回滚无空洞
-- [x] **P1-9 库存四维唯一**：`inventory_stock` 加 `(org_id, product_name, spec, grade)` 唯一索引；`findStock` 四维匹配（spec/grade 缺省空串归一）；4 张明细表/实体/DTO 补 `org_id`(必填)/`grade`(可选)
+- [x] **P1-9 库存唯一索引**：`inventory_stock` 加 `(org_id, product_name, spec, grade)` 唯一索引（**已由 P2-1 演进为五维，加 material**）；`findStock` 四维匹配（spec/grade 缺省空串归一，现已五维）；4 张明细表/实体/DTO 补 `org_id`(必填)/`grade`(可选)
 
 ### Phase 3 —— P2 完善项（可持续跟进）
 
-- [ ] **P2-10 测试**：Testcontainers + 核心并发用例（并发出库不超卖）
+- [x] **P2-10 并发不超卖**（核心已完成）：并发出库超卖 bug 已修复（乐观锁返回值检查）+ 真实 MySQL 进程级并发验证；仅 Testcontainers 容器级压测待 CI/Docker 环境（见波次记录）
 - [x] **P2-11 Flyway**（波次2-E）：V1 基线全量 + baseline-on-migrate 存量兼容，仅 inventory-service 开迁移权
 - [x] **P2-12 库龄预警落地**（波次1-C + 波次2-G）：`first_inbound_at` 读时算 `stockAgeDays`，预警动态优先/静态回退（stock_age 列保留兼容）
 - [x] **P2-13 架构定位文档**（决策 3 已拍板：模块化可插拔开源项目；ARCHITECTURE.md 落地，含模块地图/插拔点清单/部署形态/扩展指南）
@@ -45,16 +45,16 @@
 
 ## 三、上线 Checklist
 
-- [x] P0-1~P0-4 全部完成并通过测试（45 条单测全绿，2026-08-17）
+- [x] P0-1~P0-4 全部完成并通过测试（89 条单测全绿，2026-08-17）
 - [x] 生产 profile 无默认密码（application-prod.yml 全部 `${DB_URL}` 无默认 fail-fast）；`useSSL`/`allowPublicKeyRetrieval` 由运维经 DB_URL 控制（prod 样板已注明）
-- [x] 所有写接口有鉴权（35 处 Auths 校验点：单据流转/编辑/删除 + 库存/批号/安全库存写），操作人来自 OperatorContext
+- [x] 所有写接口有鉴权（50 处 Auths 校验点：单据流转/编辑/删除 + 库存/批号/安全库存写），操作人来自 OperatorContext
 - [x] 负数量/空明细被拒绝（P0-2 校验 + StockOperationService 防御 + F 波次单测固化）
 - [x] 终态单据不可删除/编辑（deleteWithItems/updateHead 状态前置校验，仅 CREATED）
-- [x] 审计日志与业务同事务（recordInTx 19 处，失败即回滚）
-- [x] 库存四维唯一索引（uk_stock_dims）+ 单号跨实例安全（doc_no_seq 原子取号，波次1-A）
+- [x] 审计日志与业务同事务（recordInTx 21 处，失败即回滚）
+- [x] 库存五维唯一索引（uk_stock_dims：org_id+product_name+material+spec+grade）+ 单号跨实例安全（doc_no_seq 原子取号，波次1-A）
 - [x] Flyway 迁移脚本幂等可重复执行（V1 全 CREATE IF NOT EXISTS + INSERT IGNORE；V1 冻结，变更走 V2+）
-- [ ] `/actuator/health` 正常，日志接入集中采集与告警
-- [ ] 核心并发测试通过（不超卖）
+- [x] `/actuator/health` 正常（冒烟验证 health=UP）；日志接入集中采集与告警（部署层，见 P2 遗留）
+- [x] 核心并发测试通过（不超卖，真实 MySQL 进程级验证；容器级压测待 CI）
 
 ## 四、实施顺序
 
@@ -102,7 +102,7 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 根 pom pluginManagement 钉定 maven-compiler-plugin **3.15.0**（消除 4 模块未钉版本的构建稳定性警告）
 - 注意：Maven 需要写 `C:\Users\Administrator\.m2`，在文件沙箱下须以完整权限运行
 
-### 波次1（4 路并行，进行中）
+### 波次1（4 路并行，已完成）
 | 组员 | 任务 | 冲突面隔离 |
 |------|------|-----------|
 | A | P1-8 单号原子取号（doc_no_seq 表 + LAST_INSERT_ID 同连接取号 + 4 Service 换用） | schema.sql 仅末尾追加 |
@@ -110,9 +110,9 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 | C | P2 库存库龄（first_inbound_at + 读接口 stockAgeDays + 种子演示数据） | schema.sql 仅 inventory_stock 区 |
 | D | P2 测试地基（ximu-common：Auths/OperatorContext 纯单元测试 + test 依赖） | 仅 ximu-common |
 
-### 波次1 交付记录（验收中）
+### 波次1 交付记录（已验收）
 - **C 库存库龄 ✅**：schema/实体/联动/读接口/测试五处齐备；遗留风险：
-  - `stock_age`（静态列，恒 0）与 `stockAgeDays`（读时计算）语义并存，预警标红仍基于前者——待后续统一（波次2 议题）
+  - `stock_age`（静态列，恒 0）与 `stockAgeDays`（读时计算）语义并存——**已由波次2-G 统一**：isWarn 动态优先/静态回退
   - inventory-service 缺 test 依赖（C 按约束未碰 pom）；A 的任务单已含此职责，验收时组长兜底
   - 存量库 INSERT IGNORE 幂等：已存在种子行不会回填 first_inbound_at，需重建表或手动 UPDATE
 - **A 单号原子取号 ✅**：`doc_no_seq` 表 + `DocNoSequenceService`（`LAST_INSERT_ID(1)` 双分支原子模式，
@@ -134,6 +134,11 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
     同步修正固化用例；requireNotSelfOrAdmin 补 id 判空
 - 验收纪律：子 Agent 禁跑 mvn/git；编译与测试由组长在波次合并后统一执行；git 由组长按任务进度分批提交（用户授权，不推送）
 
+### 波次1 合并验收（✅ 2026-08-17）
+- `mvn clean test` → **BUILD SUCCESS**（5 模块）+ **45 条测试全绿**（AuthsTest 15 / OperatorContextTest 17 / StockAgeTest 5 / DocNoGeneratorTest 8）
+- 构建环境备忘：Maven 需 .m2 写权限（沙箱内用 `-Dmaven.repo.local=工作区` 规避）；surefire fork 的 cmd.exe 管道被沙箱禁，需 `-DforkCount=0` 进程内跑测试；后续正式 CI/本机无此限制
+- 至此 **P1-5 / P1-6 / P1-8 / P2 库龄 / P2 测试地基 全部完成并通过编译+测试验收**
+
 ### 波次2 合并验收（✅ 2026-08-17）
 - `mvn clean test` → **BUILD SUCCESS**（5 模块）+ **79 条测试全绿**
   （AuthsTest 15 / OperatorContextTest 17 / StockAgeTest 5 / StockOperationServiceTest 21 / StockWarnTest 7 / DocNoGeneratorTest 8 / DocNoSequenceServiceTest 6）
@@ -141,13 +146,16 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 测试环境备忘（沙箱内）：Mockito inline mock maker 需 `MAVEN_OPTS=-Djdk.attach.allowAttachSelf=true`（免 spawn 外部进程）；正式 CI/本机无此限制
 - 至此 **P2-11 Flyway / P2-12 库龄预警 / 服务层单测地基 全部完成并通过编译+测试验收**
 
-### 波次1 合并验收（✅ 2026-08-17）
-- `mvn clean test` → **BUILD SUCCESS**（5 模块）+ **45 条测试全绿**（AuthsTest 15 / OperatorContextTest 17 / StockAgeTest 5 / DocNoGeneratorTest 8）
-- 构建环境备忘：Maven 需 .m2 写权限（沙箱内用 `-Dmaven.repo.local=工作区` 规避）；surefire fork 的 cmd.exe 管道被沙箱禁，需 `-DforkCount=0` 进程内跑测试；后续正式 CI/本机无此限制
-- 至此 **P1-5 / P1-6 / P1-8 / P2 库龄 / P2 测试地基 全部完成并通过编译+测试验收**
+### 架构定位文档 P2-13（✅ 2026-08-17，组长执行）
+- ARCHITECTURE.md 155 行（定位声明/模块地图/可插拔点清单 5 项/部署形态/扩展指南 6 步/开源协作约定）+ README 架构定位小节
+- 组长事实抽查通过：app.auth.enabled 头契约开关（yml+Filter @Value）、单测分布表、V1 冻结纪律均与实况一致
 
-- **H 架构定位文档 ✅（波次3）**：ARCHITECTURE.md 155 行（定位声明/模块地图/可插拔点清单 5 项/部署形态/扩展指南 6 步/开源协作约定）+ README 架构定位小节；
-  组长事实抽查通过：app.auth.enabled 头契约开关（yml+Filter @Value）、单测 79 条分布表、V1 冻结纪律均与实况一致
+### 首次启动冒烟（✅ 2026-08-17，组长执行）
+- **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
+- 接口冒烟全通过：health=UP；无身份头 → HTTP 401（RBAC 拦截）；带 ADMIN 头列表 → 200 + V1 种子数据；POST 建单 → `IN20260817001`（原子取号真机工作）+ 库存联动建行 + 库龄预警真实触发（电解铜 16 天>15 阈值 warn=true）
+- **发现并修复真实 bug**：`characterEncoding=utf8mb4` 是非法值（Connector/J 8.x 只认 Java 字符集名），启动即 `Unsupported character encoding`；改为 `characterEncoding=utf8`（MySQL 8 服务端默认即 utf8mb4）。4 处：两服务 application.yml + README + 本计划文档。**该 bug 编译/单测均无法发现，仅真机启动暴露**
+- 构建加速：新增 `mvn-settings.xml`（阿里云 central 镜像），下载从 3~17 KB/s 提升至 165 KB/s~2.7 MB/s
+- 冒烟固化：新增 `scripts/smoke-test.ps1`（打包→全新库启动→Flyway 迁移→健康轮询→401 拦截→建单取号→库存联动→停服，5 步断言），语法校验通过，各断言与手动冒烟逐条一致
 
 ### 并发不超卖修复（✅ 2026-08-17，组长执行，P2-10 核心）
 - 实证超卖 bug：JDBC 并发程序（真实 MySQL）复现——2 线程各扣 8、库存 10，乐观锁使第二个 updateById 返回 0 行，但 StockOperationService.decreaseStock 未检查返回值，导致冲突线程静默成功，两张出库单都 APPROVED、库存只扣一次（超卖）
@@ -217,15 +225,15 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 三个 Controller.create 改白名单赋值，与各自 update 白名单对齐
 - 验证：5 模块编译通过 + 全量 89 测试全绿
 
-### 首次启动冒烟（✅ 2026-08-17，组长执行）
-- **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
-- 接口冒烟全通过：health=UP；无身份头 → HTTP 401（RBAC 拦截）；带 ADMIN 头列表 → 200 + V1 种子数据；POST 建单 → `IN20260817001`（原子取号真机工作）+ 库存联动建行 + 库龄预警真实触发（电解铜 16 天>15 阈值 warn=true）
-- **发现并修复真实 bug**：`characterEncoding=utf8mb4` 是非法值（Connector/J 8.x 只认 Java 字符集名），启动即 `Unsupported character encoding`；改为 `characterEncoding=utf8`（MySQL 8 服务端默认即 utf8mb4）。4 处：两服务 application.yml + README + 本计划文档。**该 bug 编译/单测均无法发现，仅真机启动暴露**
-- 构建加速：新增 `mvn-settings.xml`（阿里云 central 镜像），下载从 3~17 KB/s 提升至 165 KB/s~2.7 MB/s
-- 冒烟固化：新增 `scripts/smoke-test.ps1`（打包→全新库启动→Flyway 迁移→健康轮询→401 拦截→建单取号→库存联动→停服，5 步断言），语法校验通过，各断言与手动冒烟逐条一致
-
-### 组长终验结论（2026-08-17）
-- 改造清单中 **P0 全部、P1 全部、P2 除 P2-10/P2-13 外全部完成**，均有代码 + 测试 + 构建证据
-- **P2-10 Testcontainers 并发测试**：Mockito 层单测已补（47 例）；容器级并发用例需 Docker/CI 环境执行，本环境无法验证，移交 CI
-- **P2-13 架构定位文档**：依赖决策 3（独立部署 or 嵌入父应用），待业务拍板，不在本次范围
-- 剩余上线前人工事项：起网关验证 CORS 运行期绑定（见第三节 checklist）、存量库 ALTER created_by/first_inbound_at 或重建
+### 组长终验结论（2026-08-17，最终版）
+- 改造清单中 **P0 全部、P1 全部、P2 除 Testcontainers 容器级压测外全部完成**，均有代码 + 测试 + 构建 + 真机验证证据
+- **测试规模**：89 条单测全绿（common 32 + inventory 57），含 4 个流转并发回归测试类、乐观锁冲突、幂等、取号、库龄预警
+- **真机验证链**：首次启动冒烟（Flyway V1）→ 存量库迁移演练（V2~V5 负值/NULL 自愈）→ 完整建库脚本（13 表）→ 幂等/OpenAPI/并发不超卖 进程级验证
+- **安全审计闭环**：外部三轮审计（3 P0 + 5 P1 + 7 P2 + 4 R）全部核实属实并修复，仅 P2-4 调拨联动经用户拍板「不做改动」
+- **架构**：决策 3 拍板「模块化可插拔开源项目」，ARCHITECTURE.md 落地（P2-13 完成）
+- **剩余上线前事项**：
+  1. Testcontainers 容器级并发压测（需 CI/Docker 环境，沙箱内 docker 不可见）
+  2. 起网关验证 CORS 运行期绑定（编译无法验证）
+  3. 日志接入集中采集与告警（部署层配置）
+  4. 三端 GATEWAY_TOKEN / JWT_SECRET 环境变量一致（部署责任，代码无法自动验证）
+  5. dev 库已用 data/ximu_init.sql 重建为最新 schema（2026-08-17），无需再 ALTER
