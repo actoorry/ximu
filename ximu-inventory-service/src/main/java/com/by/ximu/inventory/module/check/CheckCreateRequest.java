@@ -1,5 +1,7 @@
 package com.by.ximu.inventory.module.check;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -21,10 +23,14 @@ public class CheckCreateRequest {
     private String batchNo;
 
     /** 明细列表（推荐传多行商品） */
+    @Valid
     private List<CheckItem> items;
 
     // ===== 兼容旧版单品字段（旧盘点头仅有 actualQty，productName/spec 可选补传） =====
+    private Long orgId;
     private String productName;
+    private String grade;
     private String spec;
+    @PositiveOrZero(message = "实盘数量不能为负")
     private BigDecimal actualQty;
 }

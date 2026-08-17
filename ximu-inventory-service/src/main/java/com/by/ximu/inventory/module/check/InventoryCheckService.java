@@ -126,7 +126,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         updateById(check);
         // 库存联动：按明细逐行校正到实盘数量
         for (CheckItem it : listItems(id)) {
-            stockOperationService.adjustStock(it.getProductName(), it.getSpec(), it.getActualQty());
+            stockOperationService.adjustStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getSpec(), it.getActualQty());
         }
     }
 
@@ -137,6 +137,10 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
     public void deleteWithItems(Long id) {
         if (id == null) {
             return;
+        }
+        InventoryCheck head = getById(id);
+        if (head != null && !"CREATED".equals(head.getStatus())) {
+            throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
         }
         checkItemMapper.delete(new LambdaQueryWrapper<CheckItem>().eq(CheckItem::getCheckId, id));
         removeById(id);
@@ -167,7 +171,9 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         List<CheckItem> items = req.getItems();
         if ((items == null || items.isEmpty()) && req.getActualQty() != null) {
             CheckItem single = new CheckItem();
+            single.setOrgId(req.getOrgId());
             single.setProductName(req.getProductName());
+            single.setGrade(req.getGrade());
             single.setSpec(req.getSpec());
             single.setActualQty(req.getActualQty());
             return new ArrayList<>(List.of(single));

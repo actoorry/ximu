@@ -112,7 +112,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
         updateById(outbound);
         // 库存联动：按明细逐行扣减
         for (OutboundItem it : listItems(id)) {
-            stockOperationService.decreaseStock(it.getProductName(), it.getSpec(), it.getQty());
+            stockOperationService.decreaseStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getSpec(), it.getQty());
         }
     }
 
@@ -123,6 +123,10 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
     public void deleteWithItems(Long id) {
         if (id == null) {
             return;
+        }
+        Outbound head = getById(id);
+        if (head != null && !"CREATED".equals(head.getStatus())) {
+            throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
         }
         outboundItemMapper.delete(new LambdaQueryWrapper<OutboundItem>().eq(OutboundItem::getOutboundId, id));
         removeById(id);
@@ -152,7 +156,9 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
         List<OutboundItem> items = req.getItems();
         if ((items == null || items.isEmpty()) && StringUtils.hasText(req.getProductName())) {
             OutboundItem single = new OutboundItem();
+            single.setOrgId(req.getOrgId());
             single.setProductName(req.getProductName());
+            single.setGrade(req.getGrade());
             single.setQty(req.getQty());
             return new ArrayList<>(List.of(single));
         }

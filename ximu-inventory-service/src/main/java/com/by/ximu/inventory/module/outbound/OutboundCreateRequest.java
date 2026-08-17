@@ -1,5 +1,7 @@
 package com.by.ximu.inventory.module.outbound;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -31,9 +33,13 @@ public class OutboundCreateRequest {
     private String driverPhone;
 
     /** 明细列表（推荐传多行商品） */
+    @Valid
     private List<OutboundItem> items;
 
     // ===== 兼容旧版单品字段 =====
+    private Long orgId;
     private String productName;
+    private String grade;
+    @Positive(message = "数量必须为正数")
     private BigDecimal qty;
 }

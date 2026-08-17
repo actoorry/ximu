@@ -15,6 +15,7 @@
         <module>ximu-common</module>
         <module>ximu-inventory-service</module>
         <module>ximu-safe-stock-service</module>
+        <module>ximu-gateway</module>
     </modules>
 
     <properties>
@@ -24,6 +25,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-boot.version>3.2.5</spring-boot.version>
         <mybatis-plus.version>3.5.9</mybatis-plus.version>
+        <spring-cloud.version>2023.0.3</spring-cloud.version>
+        <jjwt.version>0.12.5</jjwt.version>
     </properties>
 
     <dependencyManagement>
@@ -33,6 +36,14 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
                 <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Spring Cloud BOM：统一管理 spring-cloud-gateway 等版本 -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

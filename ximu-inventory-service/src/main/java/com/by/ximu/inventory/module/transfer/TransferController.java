@@ -1,5 +1,6 @@
 package com.by.ximu.inventory.module.transfer;
 
+import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
 import com.by.ximu.inventory.module.log.OperationLogService;
@@ -45,7 +46,7 @@ public class TransferController {
     @PostMapping
     public Result<TransferDetailVO> create(@Valid @RequestBody TransferCreateRequest req) {
         TransferDetailVO vo = transferService.create(req);
-        operationLogService.record("transfer", "CREATE", vo.getId(), vo.getTransferNo(), null, req);
+        operationLogService.record("transfer", "CREATE", vo.getId(), vo.getTransferNo(), OperatorContext.getOperatorName(), req);
         return Result.ok(vo);
     }
 
@@ -56,11 +57,11 @@ public class TransferController {
             switch (action) {
                 case "approve" -> {
                     transferService.approve(id);
-                    operationLogService.record("transfer", "APPROVE", id, null, operator(body), null);
+                    operationLogService.record("transfer", "APPROVE", id, null, OperatorContext.getOperatorName(), null);
                 }
                 case "complete" -> {
                     transferService.complete(id);
-                    operationLogService.record("transfer", "COMPLETE", id, null, operator(body), null);
+                    operationLogService.record("transfer", "COMPLETE", id, null, OperatorContext.getOperatorName(), null);
                 }
                 default -> throw new IllegalArgumentException("不支持的流转动作: " + action);
             }
@@ -70,7 +71,7 @@ public class TransferController {
         entity.setId(id);
         entity.setStatus(null); // 防越权
         transferService.updateById(entity);
-        operationLogService.record("transfer", "UPDATE", id, entity.getTransferNo(), null, entity);
+        operationLogService.record("transfer", "UPDATE", id, entity.getTransferNo(), OperatorContext.getOperatorName(), entity);
         return Result.ok();
     }
 
@@ -78,7 +79,7 @@ public class TransferController {
     public Result<Void> delete(@PathVariable Long id) {
         Transfer existed = transferService.getById(id);
         transferService.deleteWithItems(id);
-        operationLogService.record("transfer", "DELETE", id, existed != null ? existed.getTransferNo() : null, null, null);
+        operationLogService.record("transfer", "DELETE", id, existed != null ? existed.getTransferNo() : null, OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 
@@ -86,7 +87,5 @@ public class TransferController {
         return body.containsKey("action") && body.keySet().stream().allMatch(TRANSITION_KEYS::contains);
     }
 
-    private String operator(Map<String, Object> body) {
-        return body.containsKey("operator") ? String.valueOf(body.get("operator")) : null;
-    }
+
 }

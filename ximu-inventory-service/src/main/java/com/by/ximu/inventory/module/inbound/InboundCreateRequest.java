@@ -1,5 +1,8 @@
 package com.by.ximu.inventory.module.inbound;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -30,10 +33,15 @@ public class InboundCreateRequest {
     private String auditLevel;
 
     /** 明细列表（推荐传多行商品） */
+    @Valid
     private List<InboundItem> items;
 
     // ===== 兼容旧版单品字段（头里的单行商品），items 为空时自动转成一条明细 =====
+    private Long orgId;
     private String productName;
+    private String grade;
+    @Positive(message = "数量必须为正数")
     private BigDecimal qty;
+    @PositiveOrZero(message = "账面结算数量不能为负")
     private BigDecimal settleQty;
 }

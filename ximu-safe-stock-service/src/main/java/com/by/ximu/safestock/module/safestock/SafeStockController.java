@@ -1,5 +1,6 @@
 package com.by.ximu.safestock.module.safestock;
 
+import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
 import jakarta.validation.Valid;
@@ -34,7 +35,7 @@ public class SafeStockController {
     @PostMapping
     public Result<SafeStock> create(@Valid @RequestBody SafeStock entity) {
         safeStockService.save(entity);
-        operationLogService.record("safe-stock", "CREATE", entity.getId(), entity.getProductName(), null, entity);
+        operationLogService.record("safe-stock", "CREATE", entity.getId(), entity.getProductName(), OperatorContext.getOperatorName(), entity);
         return Result.ok(entity);
     }
 
@@ -42,7 +43,7 @@ public class SafeStockController {
     public Result<Void> update(@PathVariable Long id, @RequestBody SafeStock entity) {
         entity.setId(id);
         safeStockService.updateById(entity);
-        operationLogService.record("safe-stock", "UPDATE", id, entity.getProductName(), null, entity);
+        operationLogService.record("safe-stock", "UPDATE", id, entity.getProductName(), OperatorContext.getOperatorName(), entity);
         return Result.ok();
     }
 
@@ -50,7 +51,7 @@ public class SafeStockController {
     public Result<Void> delete(@PathVariable Long id) {
         SafeStock existed = safeStockService.getById(id);
         safeStockService.removeById(id);
-        operationLogService.record("safe-stock", "DELETE", id, existed != null ? existed.getProductName() : null, null, null);
+        operationLogService.record("safe-stock", "DELETE", id, existed != null ? existed.getProductName() : null, OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 }

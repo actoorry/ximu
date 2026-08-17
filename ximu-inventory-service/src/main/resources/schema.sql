@@ -26,7 +26,9 @@ CREATE TABLE IF NOT EXISTS inventory_inbound (
 CREATE TABLE IF NOT EXISTS inbound_item (
     id BIGINT NOT NULL AUTO_INCREMENT,
     inbound_id BIGINT NOT NULL COMMENT '入库单头ID',
+    org_id BIGINT NOT NULL COMMENT '组织ID',
     product_name VARCHAR(128) DEFAULT NULL COMMENT '品名',
+    grade VARCHAR(32) DEFAULT NULL COMMENT '等级（缺省空串参与库存匹配）',
     material VARCHAR(128) DEFAULT NULL COMMENT '物料/材质',
     spec VARCHAR(64) DEFAULT NULL COMMENT '规格',
     qty DECIMAL(18,4) DEFAULT NULL COMMENT '数量',
@@ -60,7 +62,9 @@ CREATE TABLE IF NOT EXISTS inventory_outbound (
 CREATE TABLE IF NOT EXISTS outbound_item (
     id BIGINT NOT NULL AUTO_INCREMENT,
     outbound_id BIGINT NOT NULL COMMENT '出库单头ID',
+    org_id BIGINT NOT NULL COMMENT '组织ID',
     product_name VARCHAR(128) DEFAULT NULL,
+    grade VARCHAR(32) DEFAULT NULL COMMENT '等级（缺省空串参与库存匹配）',
     material VARCHAR(128) DEFAULT NULL,
     spec VARCHAR(64) DEFAULT NULL,
     qty DECIMAL(18,4) DEFAULT NULL,
@@ -88,7 +92,9 @@ CREATE TABLE IF NOT EXISTS inventory_check (
 CREATE TABLE IF NOT EXISTS check_item (
     id BIGINT NOT NULL AUTO_INCREMENT,
     check_id BIGINT NOT NULL COMMENT '盘点单头ID',
+    org_id BIGINT NOT NULL COMMENT '组织ID',
     product_name VARCHAR(128) DEFAULT NULL,
+    grade VARCHAR(32) DEFAULT NULL COMMENT '等级（缺省空串参与库存匹配）',
     material VARCHAR(128) DEFAULT NULL,
     spec VARCHAR(64) DEFAULT NULL,
     book_qty DECIMAL(18,4) DEFAULT NULL COMMENT '账面数量',
@@ -117,7 +123,9 @@ CREATE TABLE IF NOT EXISTS inventory_transfer (
 CREATE TABLE IF NOT EXISTS transfer_item (
     id BIGINT NOT NULL AUTO_INCREMENT,
     transfer_id BIGINT NOT NULL COMMENT '调拨单头ID',
+    org_id BIGINT NOT NULL COMMENT '组织ID',
     product_name VARCHAR(128) DEFAULT NULL,
+    grade VARCHAR(32) DEFAULT NULL COMMENT '等级（缺省空串参与库存匹配）',
     material VARCHAR(128) DEFAULT NULL,
     spec VARCHAR(64) DEFAULT NULL,
     qty DECIMAL(18,4) DEFAULT NULL,
@@ -132,10 +140,10 @@ CREATE TABLE IF NOT EXISTS transfer_item (
 -- 5. 库存统计（出入库/盘点终态联动此表：actual_qty 增减/校正）
 CREATE TABLE IF NOT EXISTS inventory_stock (
     id BIGINT NOT NULL AUTO_INCREMENT,
-    product_name VARCHAR(128) DEFAULT NULL,
-    grade VARCHAR(32) DEFAULT NULL,
-    spec VARCHAR(64) DEFAULT NULL,
-    org_id BIGINT DEFAULT NULL,
+    product_name VARCHAR(128) NOT NULL,
+    grade VARCHAR(32) NOT NULL DEFAULT '',
+    spec VARCHAR(64) NOT NULL DEFAULT '',
+    org_id BIGINT NOT NULL,
     actual_qty DECIMAL(18,4) DEFAULT NULL,
     transit_qty DECIMAL(18,4) DEFAULT NULL,
     stock_age INT DEFAULT 0 COMMENT '库龄（天）',
@@ -143,7 +151,8 @@ CREATE TABLE IF NOT EXISTS inventory_stock (
     version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id)
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_stock_dims (org_id, product_name, spec, grade)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 6. 批号管理
@@ -179,7 +188,8 @@ CREATE TABLE IF NOT EXISTS operation_log (
 -- 种子数据（真实业务：电解铜 A/B 级、铜管 Φ20mm 等）
 -- 头表用 INSERT IGNORE INTO（单号唯一键兜底，遇重复自动跳过，不误删真实数据）；
 -- 明细表无业务唯一键，用「先 DELETE 关联头明细，再 INSERT」实现幂等。
--- 注意：operation_log / inventory_stock 无业务键唯一索引，重复执行会追加，
+-- 注意：operation_log 无业务键唯一索引，重复执行会追加；inventory_stock 已按
+--       (org_id, product_name, spec, grade) 建唯一索引，INSERT IGNORE 重复执行幂等。
 --       仅适合在 mode=never 场景手动执行作为示例数据。
 -- ============================================================
 
@@ -193,11 +203,11 @@ VALUES
 -- 入库明细种子（各 2 条；幂等：先删关联头明细，再插）
 DELETE FROM inbound_item WHERE inbound_id IN
     (SELECT id FROM inventory_inbound WHERE inbound_no IN ('IN20260801001','IN20260801002'));
-INSERT INTO inbound_item (inbound_id, product_name, material, spec, qty, settle_qty) VALUES
-    ((SELECT id FROM inventory_inbound WHERE inbound_no='IN20260801001'), '电解铜 A级', '电解铜', '99.99%', 5000.0000, 5000.0000),
-    ((SELECT id FROM inventory_inbound WHERE inbound_no='IN20260801001'), '铜管',        '铜',     'Φ20mm',  1200.0000, 1200.0000),
-    ((SELECT id FROM inventory_inbound WHERE inbound_no='IN20260801002'), '电解铜 B级', '电解铜', '99.95%', 800.0000,  800.0000),
-    ((SELECT id FROM inventory_inbound WHERE inbound_no='IN20260801002'), '铜板 1.5mm', '铜',     '1.5mm',  300.0000,  300.0000);
+INSERT INTO inbound_item (inbound_id, org_id, product_name, grade, material, spec, qty, settle_qty) VALUES
+    ((SELECT id FROM inventory_inbound WHERE inbound_no='IN20260801001'), 1, '电解铜 A级', 'A级',  '电解铜', '99.99%', 5000.0000, 5000.0000),
+    ((SELECT id FROM inventory_inbound WHERE inbound_no='IN20260801001'), 1, '铜管',        '合格', '铜',     'Φ20mm',  1200.0000, 1200.0000),
+    ((SELECT id FROM inventory_inbound WHERE inbound_no='IN20260801002'), 2, '电解铜 B级', 'B级',  '电解铜', '99.95%', 800.0000,  800.0000),
+    ((SELECT id FROM inventory_inbound WHERE inbound_no='IN20260801002'), 1, '铜板 1.5mm', '合格', '铜',     '1.5mm',  300.0000,  300.0000);
 
 -- 出库头种子（2 条）
 INSERT IGNORE INTO inventory_outbound
@@ -209,11 +219,11 @@ VALUES
 -- 出库明细种子（各 2 条）
 DELETE FROM outbound_item WHERE outbound_id IN
     (SELECT id FROM inventory_outbound WHERE outbound_no IN ('OUT20260805001','OUT20260805002'));
-INSERT INTO outbound_item (outbound_id, product_name, material, spec, qty) VALUES
-    ((SELECT id FROM inventory_outbound WHERE outbound_no='OUT20260805001'), '电解铜 A级', '电解铜', '99.99%', 2000.0000),
-    ((SELECT id FROM inventory_outbound WHERE outbound_no='OUT20260805001'), '铜管',        '铜',     'Φ20mm',  300.0000),
-    ((SELECT id FROM inventory_outbound WHERE outbound_no='OUT20260805002'), '电解铜 B级', '电解铜', '99.95%', 100.0000),
-    ((SELECT id FROM inventory_outbound WHERE outbound_no='OUT20260805002'), '铜板 1.5mm', '铜',     '1.5mm',  50.0000);
+INSERT INTO outbound_item (outbound_id, org_id, product_name, grade, material, spec, qty) VALUES
+    ((SELECT id FROM inventory_outbound WHERE outbound_no='OUT20260805001'), 1, '电解铜 A级', 'A级',  '电解铜', '99.99%', 2000.0000),
+    ((SELECT id FROM inventory_outbound WHERE outbound_no='OUT20260805001'), 1, '铜管',        '合格', '铜',     'Φ20mm',  300.0000),
+    ((SELECT id FROM inventory_outbound WHERE outbound_no='OUT20260805002'), 2, '电解铜 B级', 'B级',  '电解铜', '99.95%', 100.0000),
+    ((SELECT id FROM inventory_outbound WHERE outbound_no='OUT20260805002'), 1, '铜板 1.5mm', '合格', '铜',     '1.5mm',  50.0000);
 
 -- 盘点头种子（2 条）
 INSERT IGNORE INTO inventory_check
@@ -225,10 +235,10 @@ VALUES
 -- 盘点明细种子（第1条2行、第2条1行）
 DELETE FROM check_item WHERE check_id IN
     (SELECT id FROM inventory_check WHERE check_no IN ('CK20260810001','CK20260810002'));
-INSERT INTO check_item (check_id, product_name, material, spec, book_qty, actual_qty) VALUES
-    ((SELECT id FROM inventory_check WHERE check_no='CK20260810001'), '电解铜 A级', '电解铜', '99.99%', 5000.0000, 4998.0000),
-    ((SELECT id FROM inventory_check WHERE check_no='CK20260810001'), '铜管',        '铜',     'Φ20mm',  1200.0000, 1200.0000),
-    ((SELECT id FROM inventory_check WHERE check_no='CK20260810002'), '电解铜 B级', '电解铜', '99.95%', 800.0000,  800.0000);
+INSERT INTO check_item (check_id, org_id, product_name, grade, material, spec, book_qty, actual_qty) VALUES
+    ((SELECT id FROM inventory_check WHERE check_no='CK20260810001'), 1, '电解铜 A级', 'A级',  '电解铜', '99.99%', 5000.0000, 4998.0000),
+    ((SELECT id FROM inventory_check WHERE check_no='CK20260810001'), 1, '铜管',        '合格', '铜',     'Φ20mm',  1200.0000, 1200.0000),
+    ((SELECT id FROM inventory_check WHERE check_no='CK20260810002'), 2, '电解铜 B级', 'B级',  '电解铜', '99.95%', 800.0000,  800.0000);
 
 -- 调拨头种子（2 条）
 INSERT IGNORE INTO inventory_transfer
@@ -240,10 +250,10 @@ VALUES
 -- 调拨明细种子（第1条2行、第2条1行）
 DELETE FROM transfer_item WHERE transfer_id IN
     (SELECT id FROM inventory_transfer WHERE transfer_no IN ('TR20260808001','TR20260808002'));
-INSERT INTO transfer_item (transfer_id, product_name, material, spec, qty, target_location) VALUES
-    ((SELECT id FROM inventory_transfer WHERE transfer_no='TR20260808001'), '电解铜 A级', '电解铜', '99.99%', 1000.0000, '华东仓'),
-    ((SELECT id FROM inventory_transfer WHERE transfer_no='TR20260808001'), '铜管',        '铜',     'Φ20mm',  200.0000,  '华东仓'),
-    ((SELECT id FROM inventory_transfer WHERE transfer_no='TR20260808002'), '电解铜 B级', '电解铜', '99.95%', 50.0000,   '华南仓');
+INSERT INTO transfer_item (transfer_id, org_id, product_name, grade, material, spec, qty, target_location) VALUES
+    ((SELECT id FROM inventory_transfer WHERE transfer_no='TR20260808001'), 1, '电解铜 A级', 'A级',  '电解铜', '99.99%', 1000.0000, '华东仓'),
+    ((SELECT id FROM inventory_transfer WHERE transfer_no='TR20260808001'), 1, '铜管',        '合格', '铜',     'Φ20mm',  200.0000,  '华东仓'),
+    ((SELECT id FROM inventory_transfer WHERE transfer_no='TR20260808002'), 2, '电解铜 B级', 'B级',  '电解铜', '99.95%', 50.0000,   '华南仓');
 
 -- 库存统计种子（库龄 >= age_warn_days 时前端会标红预警）
 INSERT IGNORE INTO inventory_stock

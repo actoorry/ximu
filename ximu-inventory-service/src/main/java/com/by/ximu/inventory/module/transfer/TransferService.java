@@ -134,6 +134,10 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
         if (id == null) {
             return;
         }
+        Transfer head = getById(id);
+        if (head != null && !"CREATED".equals(head.getStatus())) {
+            throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
+        }
         transferItemMapper.delete(new LambdaQueryWrapper<TransferItem>().eq(TransferItem::getTransferId, id));
         removeById(id);
     }
@@ -165,7 +169,9 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
                 || StringUtils.hasText(req.getTargetLocation());
         if ((items == null || items.isEmpty()) && hasLegacy) {
             TransferItem single = new TransferItem();
+            single.setOrgId(req.getOrgId());
             single.setProductName(req.getProductName());
+            single.setGrade(req.getGrade());
             single.setQty(req.getQty());
             single.setTargetLocation(req.getTargetLocation());
             return new ArrayList<>(List.of(single));

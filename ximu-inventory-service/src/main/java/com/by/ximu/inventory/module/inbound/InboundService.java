@@ -137,7 +137,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         // 库存联动：按明细逐行增加库存（settle_qty 优先，无则用 qty）
         for (InboundItem it : listItems(id)) {
             BigDecimal qty = it.getSettleQty() != null ? it.getSettleQty() : it.getQty();
-            stockOperationService.increaseStock(it.getProductName(), it.getSpec(), qty);
+            stockOperationService.increaseStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getSpec(), qty);
         }
     }
 
@@ -148,6 +148,10 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
     public void deleteWithItems(Long id) {
         if (id == null) {
             return;
+        }
+        Inbound head = getById(id);
+        if (head != null && !"CREATED".equals(head.getStatus())) {
+            throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
         }
         inboundItemMapper.delete(new LambdaQueryWrapper<InboundItem>().eq(InboundItem::getInboundId, id));
         removeById(id);
@@ -178,7 +182,9 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         List<InboundItem> items = req.getItems();
         if ((items == null || items.isEmpty()) && StringUtils.hasText(req.getProductName())) {
             InboundItem single = new InboundItem();
+            single.setOrgId(req.getOrgId());
             single.setProductName(req.getProductName());
+            single.setGrade(req.getGrade());
             single.setQty(req.getQty());
             single.setSettleQty(req.getSettleQty());
             return new ArrayList<>(List.of(single));

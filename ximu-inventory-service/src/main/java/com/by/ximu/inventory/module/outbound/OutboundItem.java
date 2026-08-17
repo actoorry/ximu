@@ -5,6 +5,9 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import com.fasterxml.jackson.annotation.JsonFormat;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -23,8 +26,16 @@ public class OutboundItem {
     /** 出库单头ID */
     private Long outboundId;
 
+    /** 组织ID（必填） */
+    @NotNull(message = "组织不能为空")
+    private Long orgId;
+
     /** 品名 */
+    @NotBlank(message = "品名不能为空")
     private String productName;
+
+    /** 等级（可选，联动库存时缺省按空串匹配） */
+    private String grade;
 
     /** 物料/材质 */
     private String material;
@@ -33,6 +44,7 @@ public class OutboundItem {
     private String spec;
 
     /** 数量 */
+    @Positive(message = "数量必须为正数")
     private BigDecimal qty;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")

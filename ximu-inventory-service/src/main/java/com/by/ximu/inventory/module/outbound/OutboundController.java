@@ -1,5 +1,6 @@
 package com.by.ximu.inventory.module.outbound;
 
+import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
 import com.by.ximu.inventory.module.log.OperationLogService;
@@ -44,7 +45,7 @@ public class OutboundController {
     @PostMapping
     public Result<OutboundDetailVO> create(@Valid @RequestBody OutboundCreateRequest req) {
         OutboundDetailVO vo = outboundService.create(req);
-        operationLogService.record("outbound", "CREATE", vo.getId(), vo.getOutboundNo(), null, req);
+        operationLogService.record("outbound", "CREATE", vo.getId(), vo.getOutboundNo(), OperatorContext.getOperatorName(), req);
         return Result.ok(vo);
     }
 
@@ -55,7 +56,7 @@ public class OutboundController {
             switch (action) {
                 case "approve" -> {
                     outboundService.approve(id);
-                    operationLogService.record("outbound", "APPROVE", id, null, operator(body), null);
+                    operationLogService.record("outbound", "APPROVE", id, null, OperatorContext.getOperatorName(), null);
                 }
                 default -> throw new IllegalArgumentException("不支持的流转动作: " + action);
             }
@@ -65,7 +66,7 @@ public class OutboundController {
         entity.setId(id);
         entity.setStatus(null); // 防越权
         outboundService.updateById(entity);
-        operationLogService.record("outbound", "UPDATE", id, entity.getOutboundNo(), null, entity);
+        operationLogService.record("outbound", "UPDATE", id, entity.getOutboundNo(), OperatorContext.getOperatorName(), entity);
         return Result.ok();
     }
 
@@ -73,7 +74,7 @@ public class OutboundController {
     public Result<Void> delete(@PathVariable Long id) {
         Outbound existed = outboundService.getById(id);
         outboundService.deleteWithItems(id);
-        operationLogService.record("outbound", "DELETE", id, existed != null ? existed.getOutboundNo() : null, null, null);
+        operationLogService.record("outbound", "DELETE", id, existed != null ? existed.getOutboundNo() : null, OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 
@@ -81,7 +82,5 @@ public class OutboundController {
         return body.containsKey("action") && body.keySet().stream().allMatch(TRANSITION_KEYS::contains);
     }
 
-    private String operator(Map<String, Object> body) {
-        return body.containsKey("operator") ? String.valueOf(body.get("operator")) : null;
-    }
+
 }

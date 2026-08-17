@@ -1,5 +1,6 @@
 package com.by.ximu.inventory.module.inbound;
 
+import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
 import com.by.ximu.inventory.module.log.OperationLogService;
@@ -46,7 +47,7 @@ public class InboundController {
     @PostMapping
     public Result<InboundDetailVO> create(@Valid @RequestBody InboundCreateRequest req) {
         InboundDetailVO vo = inboundService.create(req);
-        operationLogService.record("inbound", "CREATE", vo.getId(), vo.getInboundNo(), null, req);
+        operationLogService.record("inbound", "CREATE", vo.getId(), vo.getInboundNo(), OperatorContext.getOperatorName(), req);
         return Result.ok(vo);
     }
 
@@ -63,12 +64,12 @@ public class InboundController {
                 case "approve" -> {
                     String auditLevel = body.get("auditLevel") != null ? String.valueOf(body.get("auditLevel")) : null;
                     inboundService.approve(id, auditLevel);
-                    operationLogService.record("inbound", "APPROVE", id, null, operator(body), Map.of("auditLevel", auditLevel == null ? "" : auditLevel));
+                    operationLogService.record("inbound", "APPROVE", id, null, OperatorContext.getOperatorName(), Map.of("auditLevel", auditLevel == null ? "" : auditLevel));
                 }
                 case "check" -> {
                     String checker = body.get("checker") != null ? String.valueOf(body.get("checker")) : null;
                     inboundService.check(id, checker);
-                    operationLogService.record("inbound", "CHECK", id, null, checker != null ? checker : operator(body), Map.of("checker", checker == null ? "" : checker));
+                    operationLogService.record("inbound", "CHECK", id, null, OperatorContext.getOperatorName(), Map.of("checker", checker == null ? "" : checker));
                 }
                 default -> throw new IllegalArgumentException("不支持的流转动作: " + action);
             }
@@ -79,7 +80,7 @@ public class InboundController {
         entity.setId(id);
         entity.setStatus(null);
         inboundService.updateById(entity);
-        operationLogService.record("inbound", "UPDATE", id, entity.getInboundNo(), null, entity);
+        operationLogService.record("inbound", "UPDATE", id, entity.getInboundNo(), OperatorContext.getOperatorName(), entity);
         return Result.ok();
     }
 
@@ -87,7 +88,7 @@ public class InboundController {
     public Result<Void> delete(@PathVariable Long id) {
         Inbound existed = inboundService.getById(id);
         inboundService.deleteWithItems(id);
-        operationLogService.record("inbound", "DELETE", id, existed != null ? existed.getInboundNo() : null, null, null);
+        operationLogService.record("inbound", "DELETE", id, existed != null ? existed.getInboundNo() : null, OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 
@@ -96,7 +97,5 @@ public class InboundController {
         return body.containsKey("action") && body.keySet().stream().allMatch(TRANSITION_KEYS::contains);
     }
 
-    private String operator(Map<String, Object> body) {
-        return body.containsKey("operator") ? String.valueOf(body.get("operator")) : null;
-    }
+
 }

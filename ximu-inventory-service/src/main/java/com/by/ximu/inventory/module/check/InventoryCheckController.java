@@ -1,5 +1,6 @@
 package com.by.ximu.inventory.module.check;
 
+import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
 import com.by.ximu.inventory.module.log.OperationLogService;
@@ -45,7 +46,7 @@ public class InventoryCheckController {
     @PostMapping
     public Result<CheckDetailVO> create(@Valid @RequestBody CheckCreateRequest req) {
         CheckDetailVO vo = inventoryCheckService.create(req);
-        operationLogService.record("check", "CREATE", vo.getId(), vo.getCheckNo(), null, req);
+        operationLogService.record("check", "CREATE", vo.getId(), vo.getCheckNo(), OperatorContext.getOperatorName(), req);
         return Result.ok(vo);
     }
 
@@ -56,11 +57,11 @@ public class InventoryCheckController {
             switch (action) {
                 case "approve" -> {
                     inventoryCheckService.approve(id);
-                    operationLogService.record("check", "APPROVE", id, null, operator(body), null);
+                    operationLogService.record("check", "APPROVE", id, null, OperatorContext.getOperatorName(), null);
                 }
                 case "check" -> {
                     inventoryCheckService.check(id);
-                    operationLogService.record("check", "CHECK", id, null, operator(body), null);
+                    operationLogService.record("check", "CHECK", id, null, OperatorContext.getOperatorName(), null);
                 }
                 default -> throw new IllegalArgumentException("不支持的流转动作: " + action);
             }
@@ -70,7 +71,7 @@ public class InventoryCheckController {
         entity.setId(id);
         entity.setStatus(null); // 防越权
         inventoryCheckService.updateById(entity);
-        operationLogService.record("check", "UPDATE", id, entity.getCheckNo(), null, entity);
+        operationLogService.record("check", "UPDATE", id, entity.getCheckNo(), OperatorContext.getOperatorName(), entity);
         return Result.ok();
     }
 
@@ -78,7 +79,7 @@ public class InventoryCheckController {
     public Result<Void> delete(@PathVariable Long id) {
         InventoryCheck existed = inventoryCheckService.getById(id);
         inventoryCheckService.deleteWithItems(id);
-        operationLogService.record("check", "DELETE", id, existed != null ? existed.getCheckNo() : null, null, null);
+        operationLogService.record("check", "DELETE", id, existed != null ? existed.getCheckNo() : null, OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 
@@ -86,7 +87,5 @@ public class InventoryCheckController {
         return body.containsKey("action") && body.keySet().stream().allMatch(TRANSITION_KEYS::contains);
     }
 
-    private String operator(Map<String, Object> body) {
-        return body.containsKey("operator") ? String.valueOf(body.get("operator")) : null;
-    }
+
 }

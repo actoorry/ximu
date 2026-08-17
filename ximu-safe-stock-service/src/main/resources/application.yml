@@ -25,6 +25,9 @@ spring:
 app:
   cors:
     allowed-origins: "http://localhost:5173,http://localhost:3000"
+  auth:
+    # 生产保持 true（要求网关注入身份头）；仅本地开发可临时 false
+    enabled: true
 
 mybatis-plus:
   configuration:

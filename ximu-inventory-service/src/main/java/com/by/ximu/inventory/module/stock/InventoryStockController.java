@@ -1,5 +1,6 @@
 package com.by.ximu.inventory.module.stock;
 
+import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
 import com.by.ximu.inventory.module.log.OperationLogService;
@@ -45,7 +46,7 @@ public class InventoryStockController {
     @PostMapping
     public Result<InventoryStock> create(@Valid @RequestBody InventoryStock entity) {
         inventoryStockService.save(entity);
-        operationLogService.record("stock", "CREATE", entity.getId(), entity.getProductName(), null, entity);
+        operationLogService.record("stock", "CREATE", entity.getId(), entity.getProductName(), OperatorContext.getOperatorName(), entity);
         return Result.ok(entity);
     }
 
@@ -53,7 +54,7 @@ public class InventoryStockController {
     public Result<Void> update(@PathVariable Long id, @RequestBody InventoryStock entity) {
         entity.setId(id);
         inventoryStockService.updateById(entity);
-        operationLogService.record("stock", "UPDATE", id, entity.getProductName(), null, entity);
+        operationLogService.record("stock", "UPDATE", id, entity.getProductName(), OperatorContext.getOperatorName(), entity);
         return Result.ok();
     }
 
@@ -61,7 +62,7 @@ public class InventoryStockController {
     public Result<Void> delete(@PathVariable Long id) {
         InventoryStock existed = inventoryStockService.getById(id);
         inventoryStockService.removeById(id);
-        operationLogService.record("stock", "DELETE", id, existed != null ? existed.getProductName() : null, null, null);
+        operationLogService.record("stock", "DELETE", id, existed != null ? existed.getProductName() : null, OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 
