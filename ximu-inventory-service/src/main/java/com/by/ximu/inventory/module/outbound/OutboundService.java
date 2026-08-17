@@ -134,7 +134,9 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
             throw new IllegalStateException("当前状态[" + outbound.getStatus() + "]不允许批准，仅 CREATED 状态可批准");
         }
         outbound.setStatus("APPROVED");
-        updateById(outbound);
+        if (!updateById(outbound)) {
+            throw new IllegalStateException("单据已被他人操作，请刷新重试");
+        }
         // 库存联动：按明细逐行扣减
         for (OutboundItem it : listItems(id)) {
             stockOperationService.decreaseStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getSpec(), it.getQty());

@@ -129,7 +129,9 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
             throw new IllegalStateException("当前状态[" + transfer.getStatus() + "]不允许批准，仅 CREATED 状态可批准");
         }
         transfer.setStatus("APPROVED");
-        updateById(transfer);
+        if (!updateById(transfer)) {
+            throw new IllegalStateException("单据已被他人操作，请刷新重试");
+        }
         operationLogService.recordInTx("transfer", "APPROVE", id, transfer.getTransferNo(), OperatorContext.getOperatorName(), null);
     }
 
@@ -150,7 +152,9 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
             throw new IllegalStateException("当前状态[" + transfer.getStatus() + "]不允许完成，仅 APPROVED 状态可完成");
         }
         transfer.setStatus("COMPLETED");
-        updateById(transfer);
+        if (!updateById(transfer)) {
+            throw new IllegalStateException("单据已被他人操作，请刷新重试");
+        }
         operationLogService.recordInTx("transfer", "COMPLETE", id, transfer.getTransferNo(), OperatorContext.getOperatorName(), null);
     }
 

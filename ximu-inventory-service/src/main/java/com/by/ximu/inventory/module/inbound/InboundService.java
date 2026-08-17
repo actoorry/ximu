@@ -141,7 +141,9 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         }
         inbound.setStatus("APPROVED");
         inbound.setAuditLevel(auditLevel);
-        updateById(inbound);
+        if (!updateById(inbound)) {
+            throw new IllegalStateException("单据已被他人操作，请刷新重试");
+        }
         operationLogService.recordInTx("inbound", "APPROVE", id, inbound.getInboundNo(), OperatorContext.getOperatorName(),
                 Map.of("auditLevel", auditLevel == null ? "" : auditLevel));
     }
@@ -162,7 +164,9 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         }
         inbound.setStatus("CHECKED");
         inbound.setChecker(checker);
-        updateById(inbound);
+        if (!updateById(inbound)) {
+            throw new IllegalStateException("单据已被他人操作，请刷新重试");
+        }
         // 库存联动：按明细逐行增加库存（settle_qty 优先，无则用 qty）
         for (InboundItem it : listItems(id)) {
             BigDecimal qty = it.getSettleQty() != null ? it.getSettleQty() : it.getQty();

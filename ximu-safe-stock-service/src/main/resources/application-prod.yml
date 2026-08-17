@@ -38,6 +38,8 @@ spring:
 app:
   cors:
     allowed-origins: "${CORS_ORIGINS}"
+  # 生产必填：与网关 GATEWAY_TOKEN 一致；缺失即启动失败
+  gateway-token: "${GATEWAY_TOKEN}"
   auth:
     # 生产必须 true：身份头只信任网关注入，禁止绕过网关直连
     enabled: true

@@ -165,6 +165,14 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 两服务加 OpenApiConfig：文档标题/版本 + 身份头契约（X-User-Id/X-User-Name/X-User-Roles）声明为 API 级安全头，Swagger UI 顶部 Authorize 可填
 - 真实启动验证：/v3/api-docs 返回 13 个接口路径（inbound/outbound/check/transfer/stock/batch/log 全量）；/swagger-ui/index.html 可达（HTTP 200）
 
+### P0 阻断项修复（✅ 2026-08-17，组长执行，外部审计触发）
+- 审计结论：3 个 P0 全部属实并修复
+- P0-1 状态流转乐观锁：6 处流转方法（Inbound approve/check、Outbound approve、Check approve/check、Transfer approve/complete）updateById 返回值未检查，并发 approve 同单会扣两次库存/账实分离；已全部补 if(!updateById) 抛异常回滚
+- P0-3 网关 JWT 不校验过期：parseSignedClaims 只验签名不验 exp；已补显式过期时间校验
+- P0-2 下游信任 X-User-* 头可直连伪造管理员：加内部共享令牌 GATEWAY_TOKEN——网关注入 X-Gateway-Token、下游 OperatorContextFilter 校验；真实启动验证 无令牌/错令牌直连→401、正确令牌→200
+- 顺带 P1-4：网关新增 application-prod.yml，JWT_SECRET/GATEWAY_TOKEN 无默认值 fail-fast
+- 验证：5 模块编译通过 + 全量 82 测试全绿 + P0-2 端到端 401/200 验证
+
 ### 首次启动冒烟（✅ 2026-08-17，组长执行）
 - **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
 - 接口冒烟全通过：health=UP；无身份头 → HTTP 401（RBAC 拦截）；带 ADMIN 头列表 → 200 + V1 种子数据；POST 建单 → `IN20260817001`（原子取号真机工作）+ 库存联动建行 + 库龄预警真实触发（电解铜 16 天>15 阈值 warn=true）

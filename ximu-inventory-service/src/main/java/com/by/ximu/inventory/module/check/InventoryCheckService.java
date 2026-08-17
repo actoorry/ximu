@@ -131,7 +131,9 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
             throw new IllegalStateException("当前状态[" + check.getStatus() + "]不允许批准，仅 CREATED 状态可批准");
         }
         check.setStatus("APPROVED");
-        updateById(check);
+        if (!updateById(check)) {
+            throw new IllegalStateException("单据已被他人操作，请刷新重试");
+        }
         operationLogService.recordInTx("check", "APPROVE", id, check.getCheckNo(), OperatorContext.getOperatorName(), null);
     }
 
@@ -150,7 +152,9 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
             throw new IllegalStateException("当前状态[" + check.getStatus() + "]不允许审核，仅 APPROVED 状态可审核");
         }
         check.setStatus("CHECKED");
-        updateById(check);
+        if (!updateById(check)) {
+            throw new IllegalStateException("单据已被他人操作，请刷新重试");
+        }
         // 库存联动：按明细逐行校正到实盘数量
         for (CheckItem it : listItems(id)) {
             stockOperationService.adjustStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getSpec(), it.getActualQty());

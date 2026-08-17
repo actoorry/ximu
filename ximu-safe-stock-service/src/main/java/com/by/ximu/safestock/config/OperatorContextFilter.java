@@ -26,12 +26,23 @@ public class OperatorContextFilter extends OncePerRequestFilter {
     @Value("${app.auth.enabled:true}")
     private boolean authEnabled;
 
+    /** 内部共享令牌：非空时要求请求携带匹配的 X-Gateway-Token（证明请求经网关，防直连伪造身份） */
+    @Value("${app.gateway-token:}")
+    private String gatewayToken;
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         try {
             if (request.getRequestURI().startsWith("/api/")) {
                 if (authEnabled) {
+                    if (gatewayToken != null && !gatewayToken.isBlank()) {
+                        String token = request.getHeader("X-Gateway-Token");
+                        if (token == null || !gatewayToken.equals(token)) {
+                            writeUnauthorized(response);
+                            return;
+                        }
+                    }
                     String userId = request.getHeader("X-User-Id");
                     String userName = request.getHeader("X-User-Name");
                     if (userId == null || userId.isBlank()) {

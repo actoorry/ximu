@@ -33,6 +33,10 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
     @Value("${app.jwt.secret}")
     private String secret;
 
+    /** 内部共享令牌：网关校验 JWT 后注入，下游服务据此确认请求确经网关（防直连伪造 X-User-*） */
+    @Value("${app.gateway-token:}")
+    private String gatewayToken;
+
     @Value("${app.auth.skip-prefixes:/actuator}")
     private String skipPrefixes;
 
@@ -52,7 +56,12 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
         String token = auth.substring(7);
         try {
             SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-            Claims claims = Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
+            Claims claims = Jwts.parser().verifyWith(key).build()
+                    .parseSignedClaims(token).getPayload();
+            // jjwt 0.12.x parseSignedClaims 默认只验签名不验 exp，必须显式校验过期时间
+            if (claims.getExpiration() != null && claims.getExpiration().before(new java.util.Date())) {
+                return unauthorized(exchange);
+            }
 
             Object uid = claims.get("userId");
             String userId = uid == null ? "" : String.valueOf(uid);
@@ -66,9 +75,13 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
                         h.remove("X-User-Id");
                         h.remove("X-User-Name");
                         h.remove("X-User-Roles");
+                        h.remove("X-Gateway-Token");
                         h.add("X-User-Id", userId);
                         h.add("X-User-Name", userName);
                         h.add("X-User-Roles", roles);
+                        if (gatewayToken != null && !gatewayToken.isBlank()) {
+                            h.add("X-Gateway-Token", gatewayToken);
+                        }
                     })
                     .build();
             return chain.filter(exchange.mutate().request(mutated).build());
