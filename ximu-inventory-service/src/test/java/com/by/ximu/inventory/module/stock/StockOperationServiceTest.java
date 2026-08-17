@@ -24,7 +24,7 @@ import static org.mockito.Mockito.when;
 /**
  * {@link StockOperationService} 的纯单元测试（Mockito mock {@link InventoryStockMapper}，不依赖 DB / Spring 上下文）。
  *
- * <p>覆盖 increase / decrease / adjust 三个方法：四维匹配命中与未命中分支、spec/grade null 归一为空串、
+ * <p>覆盖 increase / decrease / adjust 三个方法：五维匹配命中与未命中分支、material/spec/grade null 归一为空串、
  * 负数 / 0 / null 数量的拒绝或忽略、库存不足异常（含品名信息）、orgId / 品名为空拒绝。
  */
 @ExtendWith(MockitoExtension.class)

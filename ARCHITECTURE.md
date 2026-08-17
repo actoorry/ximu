@@ -125,7 +125,7 @@ public static boolean isWarn(Long stockAgeDays, Integer stockAge, Integer ageWar
    ```
 
    操作人从 `OperatorContext.getOperatorId() / getOperatorName()` 读取，**不信任请求体 operator**。
-3. **审计同事务**：写操作调用 `operationLogService.recordInTx(module, op, id, no, operator, detail)`（与业务同事务、失败即回滚），不要用非事务的 `record(...)`（吞异常）。
+3. **审计分层**：单据流转/编辑/删除等事务内写操作调用 `operationLogService.recordInTx(...)`（与业务同事务、失败即回滚）；基础数据维护（库存/批号/安全库存的 CRUD）用非事务的 `record(...)`（吞异常、不阻断主流程）。
 4. **乐观锁**：实体加 `@Version private Integer version;`，DDL 带 `version INT NOT NULL DEFAULT 0`；`MybatisPlusConfig` 已注册 `OptimisticLockerInnerInterceptor`（在分页插件之前），`updateById` 返回 `false` 时抛“并发冲突”提示刷新重试。
 5. **库存五维键**：写库存统一走 `StockOperationService.increaseStock / decreaseStock / adjustStock(orgId, grade, productName, material, spec, qty)`，底层按 `org_id + product_name + material + spec + grade` 五维精确匹配（material/spec/grade 为 null 归一为空串），受 `inventory_stock.uk_stock_dims` 唯一索引约束。
 6. **DDL 变更走 V2+**：新增表 / 列在 `ximu-inventory-service/src/main/resources/db/migration/` 新增 `V2__xxx.sql`，**严禁修改已 apply 的 V1**。
@@ -139,7 +139,7 @@ public static boolean isWarn(Long stockAgeDays, Integer stockAge, Integer ageWar
   mvn clean test                  # 全量测试（波次合并验收用）
   ```
 
-- **单测规模**：当前 **89 条**全绿。
+- **单测规模**：当前 **81 条**全绿。
 
   | 测试类 | 条数 |
   |--------|------|
@@ -148,7 +148,6 @@ public static boolean isWarn(Long stockAgeDays, Integer stockAge, Integer ageWar
   | `StockAgeTest` | 5 |
   | `StockOperationServiceTest` | 24 |
   | `StockWarnTest` | 7 |
-  | `DocNoGeneratorTest` | 8 |
   | `DocNoSequenceServiceTest` | 6 |
   | `InboundServiceTest` | 2 |
   | `OutboundServiceTest` | 1 |

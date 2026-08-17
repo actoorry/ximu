@@ -45,12 +45,12 @@
 
 ## 三、上线 Checklist
 
-- [x] P0-1~P0-4 全部完成并通过测试（89 条单测全绿，2026-08-17）
+- [x] P0-1~P0-4 全部完成并通过测试（81 条单测全绿，2026-08-17）
 - [x] 生产 profile 无默认密码（application-prod.yml 全部 `${DB_URL}` 无默认 fail-fast）；`useSSL`/`allowPublicKeyRetrieval` 由运维经 DB_URL 控制（prod 样板已注明）
 - [x] 所有写接口有鉴权（50 处 Auths 校验点：单据流转/编辑/删除 + 库存/批号/安全库存写），操作人来自 OperatorContext
 - [x] 负数量/空明细被拒绝（P0-2 校验 + StockOperationService 防御 + F 波次单测固化）
 - [x] 终态单据不可删除/编辑（deleteWithItems/updateHead 状态前置校验，仅 CREATED）
-- [x] 审计日志与业务同事务（recordInTx 21 处，失败即回滚）
+- [x] 审计日志与业务同事务（recordInTx 21 处，单据流转/编辑/删除失败即回滚；基础数据维护另有 9 处用 record 吞异常、不阻断主流程）
 - [x] 库存五维唯一索引（uk_stock_dims：org_id+product_name+material+spec+grade）+ 单号跨实例安全（doc_no_seq 原子取号，波次1-A）
 - [x] Flyway 迁移脚本幂等可重复执行（V1 全 CREATE IF NOT EXISTS + INSERT IGNORE；V1 冻结，变更走 V2+）
 - [x] `/actuator/health` 正常（冒烟验证 health=UP）；日志接入集中采集与告警（部署层，见 P2 遗留）
@@ -200,13 +200,13 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 验证：5 模块编译通过 + 全量 82 测试全绿
 
 ### 复审 R 项修复（✅ 2026-08-17，组长执行，二次审计触发）
-- R1 流转并发无回归测试：新增 4 个 Service 流转测试类（Inbound/Outbound/Check/Transfer），锁死 6 处 updateById=false 抛异常（共 7 用例），测试总数 82→89
+- R1 流转并发无回归测试：新增 4 个 Service 流转测试类（Inbound/Outbound/Check/Transfer），锁死 6 处 updateById=false 抛异常（共 7 用例），测试总数 82→89（后删旧 DocNoGeneratorTest 8 例，最终 81）
 - R2 JWT 无 exp 放行：改严格校验——exp 缺失或已过期一律 401
 - R3 V4 迁移负值失败：加存量负值归零 + 注释警告（负库存为历史异常，上线后需人工核对账实）
 - R4 库存 update 覆盖清空阈值：改部分更新语义（字段 null 保持原值，与单据 updateHead 一致）
 - 次要项：BatchController update 捕获 DuplicateKeyException 转友好提示；V1 顶部注释更新（不再宣称与 schema.sql 逐字节一致）
 - GATEWAY_TOKEN 边界、分页 like 无索引等已记录（见上线 checklist）
-- 验证：5 模块编译通过 + 全量 89 测试全绿
+- 验证：5 模块编译通过 + 全量 81 测试全绿
 
 ### 存量库迁移演练（✅ 2026-08-17，组长执行）
 - 构造存量库 ximu_migrate_test：执行 V1 建表 + 插入含负值(-5)/NULL 数量的存量数据，模拟上线前旧库
@@ -223,11 +223,18 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 库存/批号/安全库存的 create 原直接用实体 save，可传 id/version/createdAt/updatedAt/账本字段
 - 新增 3 个 CreateRequest DTO：InventoryStockCreateRequest（屏蔽 id/version/时间戳/firstInboundAt/actualQty/transitQty，仅收维度行字段）、BatchCreateRequest、SafeStockCreateRequest
 - 三个 Controller.create 改白名单赋值，与各自 update 白名单对齐
-- 验证：5 模块编译通过 + 全量 89 测试全绿
+- 验证：5 模块编译通过 + 全量 81 测试全绿
+
+### 文档同步与死代码清理（✅ 2026-08-17，组长执行，三轮审查触发）
+- 四维注释残留 3 处 → 五维（StockOperationService 类注释/requireOrg 注释 + StockOperationServiceTest 类注释）
+- ARCHITECTURE record/recordInTx 分层表述修正（单据事务用 recordInTx，基础数据维护用 record）
+- checklist 审计表述精确化（recordInTx 21 处 + 基础数据 9 处 record）
+- 删除死代码 DocNoGenerator.java + DocNoGeneratorTest.java（旧单号方案，已被 DocNoSequenceService 替代）+ 冗余 safe-stock schema.sql（表已纳入 inventory V3）
+- 测试数 89 → 81（删 DocNoGeneratorTest 8 例）
 
 ### 组长终验结论（2026-08-17，最终版）
 - 改造清单中 **P0 全部、P1 全部、P2 除 Testcontainers 容器级压测外全部完成**，均有代码 + 测试 + 构建 + 真机验证证据
-- **测试规模**：89 条单测全绿（common 32 + inventory 57），含 4 个流转并发回归测试类、乐观锁冲突、幂等、取号、库龄预警
+- **测试规模**：81 条单测全绿（common 32 + inventory 49），含 4 个流转并发回归测试类、乐观锁冲突、幂等、取号、库龄预警
 - **真机验证链**：首次启动冒烟（Flyway V1）→ 存量库迁移演练（V2~V5 负值/NULL 自愈）→ 完整建库脚本（13 表）→ 幂等/OpenAPI/并发不超卖 进程级验证
 - **安全审计闭环**：外部三轮审计（3 P0 + 5 P1 + 7 P2 + 4 R）全部核实属实并修复，仅 P2-4 调拨联动经用户拍板「不做改动」
 - **架构**：决策 3 拍板「模块化可插拔开源项目」，ARCHITECTURE.md 落地（P2-13 完成）

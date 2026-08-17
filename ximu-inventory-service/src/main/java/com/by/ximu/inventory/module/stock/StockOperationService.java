@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
- * 库存联动服务：出入库/盘点流转到终态时按 {@code org_id + product_name + spec + grade} 四维联动 {@code inventory_stock}。
+ * 库存联动服务：出入库/盘点流转到终态时按 {@code org_id + product_name + material + spec + grade} 五维联动 {@code inventory_stock}。
  *
  * <p>本服务的三个方法均标注 {@code @Transactional}（默认 {@code REQUIRED}），
  * 由调用方（inbound.check / outbound.approve / check.check）保证「状态流转 + 库存联动」在同一事务内，
@@ -130,7 +130,7 @@ public class StockOperationService {
         return stock;
     }
 
-    /** 组织维度为空时拒绝，避免四维键缺失导致错配 */
+    /** 组织维度为空时拒绝，避免五维键缺失导致错配 */
     private void requireOrg(Long orgId) {
         if (orgId == null) {
             throw new IllegalArgumentException("组织(orgId)不能为空");
