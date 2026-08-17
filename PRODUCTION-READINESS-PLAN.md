@@ -188,7 +188,7 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - P2-5 字段加长：plate_no VARCHAR(16)、driver VARCHAR(32)（V4 迁移）
 - P2-6 幂等 requestId：README 明确生产前端必须传（服务端无法区分重试与合法重复建单，保持可选兼容）
 - P2-7 兼容字段校验：四个 normalizeItems 兼容分支补 orgId 非空校验
-- P2-4 调拨不联动库存：确认为设计约束（stock 无库位维度，类注释已说明），非 bug；真正修复需给库存加库位维度（架构改造，待用户拍板）
+- P2-4 调拨不联动库存：确认为设计约束（stock 无库位维度，类注释已说明），非 bug；**用户拍板（2026-08-17）：不做改动**，保持现状（调拨仅记录单据，库存不联动）
 - 验证：5 模块编译通过 + 全量 82 测试全绿
 
 ### 复审 R 项修复（✅ 2026-08-17，组长执行，二次审计触发）
@@ -199,6 +199,12 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - 次要项：BatchController update 捕获 DuplicateKeyException 转友好提示；V1 顶部注释更新（不再宣称与 schema.sql 逐字节一致）
 - GATEWAY_TOKEN 边界、分页 like 无索引等已记录（见上线 checklist）
 - 验证：5 模块编译通过 + 全量 89 测试全绿
+
+### 存量库迁移演练（✅ 2026-08-17，组长执行）
+- 构造存量库 ximu_migrate_test：执行 V1 建表 + 插入含负值(-5)/NULL 数量的存量数据，模拟上线前旧库
+- 启动服务触发 Flyway：baseline-on-migrate 打 baseline 1 跳过 V1，V2→V3→V4→V5 全部成功（now at version v5）
+- 验证结果：负值 -5 归零、NULL 回填 0、material 五维唯一键(org_id,product_name,material,spec,grade)、CHECK 约束 chk_stock_qty_nonneg、inventory_safe_stock 表存在；正常数据(3000/900/700/500/100)原样保留
+- 结论：V2~V5 增量迁移在「旧库带数据」场景下可顺利跑通，含 R3 的负值/NULL 自愈
 
 ### 首次启动冒烟（✅ 2026-08-17，组长执行）
 - **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
