@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS inventory_inbound (
     inbound_type VARCHAR(20) DEFAULT NULL COMMENT '估价/代销/内部',
     source_order_no VARCHAR(64) DEFAULT NULL COMMENT '来源单号',
     status VARCHAR(20) NOT NULL DEFAULT 'CREATED' COMMENT 'CREATED/APPROVED/CHECKED',
+    created_by BIGINT NOT NULL COMMENT '制单人ID',
     checker VARCHAR(64) DEFAULT NULL,
     audit_level VARCHAR(20) DEFAULT NULL COMMENT '直接审核/总监审核/经理审核',
     version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS inventory_outbound (
     driver VARCHAR(5) DEFAULT NULL,
     driver_phone VARCHAR(11) DEFAULT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'CREATED' COMMENT 'CREATED/APPROVED',
+    created_by BIGINT NOT NULL COMMENT '制单人ID',
     version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -81,6 +83,7 @@ CREATE TABLE IF NOT EXISTS inventory_check (
     check_no VARCHAR(64) NOT NULL,
     batch_no VARCHAR(64) DEFAULT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'CREATED' COMMENT 'CREATED/APPROVED/CHECKED',
+    created_by BIGINT NOT NULL COMMENT '制单人ID',
     version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -112,6 +115,7 @@ CREATE TABLE IF NOT EXISTS inventory_transfer (
     transfer_no VARCHAR(64) NOT NULL,
     batch_no VARCHAR(64) DEFAULT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'CREATED' COMMENT 'CREATED/APPROVED/COMPLETED',
+    created_by BIGINT NOT NULL COMMENT '制单人ID',
     version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -148,6 +152,7 @@ CREATE TABLE IF NOT EXISTS inventory_stock (
     transit_qty DECIMAL(18,4) DEFAULT NULL,
     stock_age INT DEFAULT 0 COMMENT '库龄（天）',
     age_warn_days INT DEFAULT 15 COMMENT '库龄预警阈值（天）',
+    first_inbound_at DATETIME NULL COMMENT '首次入库时间（库龄计算用）',
     version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -195,10 +200,10 @@ CREATE TABLE IF NOT EXISTS operation_log (
 
 -- 入库头种子（2 条）
 INSERT IGNORE INTO inventory_inbound
-    (inbound_no, inbound_type, source_order_no, status, checker, audit_level)
+    (inbound_no, inbound_type, source_order_no, status, created_by, checker, audit_level)
 VALUES
-    ('IN20260801001', '估价', 'PO20260730001', 'CHECKED',  '张三', '总监审核'),
-    ('IN20260801002', '代销', 'PO20260730002', 'APPROVED', NULL,   '经理审核');
+    ('IN20260801001', '估价', 'PO20260730001', 'CHECKED',  1, '张三', '总监审核'),
+    ('IN20260801002', '代销', 'PO20260730002', 'APPROVED', 1, NULL,   '经理审核');
 
 -- 入库明细种子（各 2 条；幂等：先删关联头明细，再插）
 DELETE FROM inbound_item WHERE inbound_id IN
@@ -211,10 +216,10 @@ INSERT INTO inbound_item (inbound_id, org_id, product_name, grade, material, spe
 
 -- 出库头种子（2 条）
 INSERT IGNORE INTO inventory_outbound
-    (outbound_no, sale_order_no, freight_bearer, carrier, plate_no, driver, driver_phone, status)
+    (outbound_no, sale_order_no, freight_bearer, carrier, plate_no, driver, driver_phone, status, created_by)
 VALUES
-    ('OUT20260805001', 'SO20260804001', '博宇承担', '顺丰物流', '京A12345', '王武', '13800138000', 'APPROVED'),
-    ('OUT20260805002', 'SO20260804002', '对方承担', '德邦物流', '京B67890', '李四', '13900139000', 'CREATED');
+    ('OUT20260805001', 'SO20260804001', '博宇承担', '顺丰物流', '京A12345', '王武', '13800138000', 'APPROVED', 1),
+    ('OUT20260805002', 'SO20260804002', '对方承担', '德邦物流', '京B67890', '李四', '13900139000', 'CREATED',  1);
 
 -- 出库明细种子（各 2 条）
 DELETE FROM outbound_item WHERE outbound_id IN
@@ -227,10 +232,10 @@ INSERT INTO outbound_item (outbound_id, org_id, product_name, grade, material, s
 
 -- 盘点头种子（2 条）
 INSERT IGNORE INTO inventory_check
-    (check_no, batch_no, status)
+    (check_no, batch_no, status, created_by)
 VALUES
-    ('CK20260810001', 'BT20260801001', 'CHECKED'),
-    ('CK20260810002', 'BT20260801002', 'APPROVED');
+    ('CK20260810001', 'BT20260801001', 'CHECKED',  1),
+    ('CK20260810002', 'BT20260801002', 'APPROVED', 1);
 
 -- 盘点明细种子（第1条2行、第2条1行）
 DELETE FROM check_item WHERE check_id IN
@@ -242,10 +247,10 @@ INSERT INTO check_item (check_id, org_id, product_name, grade, material, spec, b
 
 -- 调拨头种子（2 条）
 INSERT IGNORE INTO inventory_transfer
-    (transfer_no, batch_no, status)
+    (transfer_no, batch_no, status, created_by)
 VALUES
-    ('TR20260808001', 'BT20260801001', 'COMPLETED'),
-    ('TR20260808002', 'BT20260801002', 'APPROVED');
+    ('TR20260808001', 'BT20260801001', 'COMPLETED', 1),
+    ('TR20260808002', 'BT20260801002', 'APPROVED', 1);
 
 -- 调拨明细种子（第1条2行、第2条1行）
 DELETE FROM transfer_item WHERE transfer_id IN
@@ -257,12 +262,12 @@ INSERT INTO transfer_item (transfer_id, org_id, product_name, grade, material, s
 
 -- 库存统计种子（库龄 >= age_warn_days 时前端会标红预警）
 INSERT IGNORE INTO inventory_stock
-    (product_name, grade, spec, org_id, actual_qty, transit_qty, stock_age, age_warn_days)
+    (product_name, grade, spec, org_id, actual_qty, transit_qty, stock_age, age_warn_days, first_inbound_at)
 VALUES
-    ('电解铜 A级', 'A级', '99.99%',  1, 3000.0000, 1000.0000, 20, 15),
-    ('铜管',        '合格', 'Φ20mm',   1,  900.0000,    0.0000,  5, 15),
-    ('电解铜 B级', 'B级', '99.95%',  2,  700.0000,  100.0000, 30, 15),
-    ('铜板 1.5mm', '合格', '1.5mm',   1,  500.0000,    0.0000,  8, 15);
+    ('电解铜 A级', 'A级', '99.99%',  1, 3000.0000, 1000.0000, 20, 15, '2026-08-01 10:00:00'),
+    ('铜管',        '合格', 'Φ20mm',   1,  900.0000,    0.0000,  5, 15, '2026-08-10 09:00:00'),
+    ('电解铜 B级', 'B级', '99.95%',  2,  700.0000,  100.0000, 30, 15, '2026-07-20 10:00:00'),
+    ('铜板 1.5mm', '合格', '1.5mm',   1,  500.0000,    0.0000,  8, 15, '2026-08-06 10:00:00');
 
 -- 批号种子
 INSERT IGNORE INTO inventory_batch
@@ -279,3 +284,7 @@ VALUES
     ('inbound',  'CREATE', NULL, 'IN20260801001', '系统初始化', '{"items":2,"inboundType":"估价"}'),
     ('inbound',  'CHECK',  NULL, 'IN20260801001', '系统初始化', '{"checker":"张三","auditLevel":"总监审核"}'),
     ('outbound', 'CREATE', NULL, 'OUT20260805001', '系统初始化', '{"items":2,"freightBearer":"博宇承担"}');
+
+-- 单号序列表（原子取号）：seq_key = 单据前缀 + yyyyMMdd，多实例下通过 DB 原子自增保证当天同类单据序号不重复
+CREATE TABLE IF NOT EXISTS doc_no_seq (seq_key VARCHAR(64) NOT NULL PRIMARY KEY, seq BIGINT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT '单号序列（原子取号）';
+
