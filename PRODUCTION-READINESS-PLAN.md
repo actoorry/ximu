@@ -40,7 +40,7 @@
 - [x] **P2-11 Flyway**（波次2-E）：V1 基线全量 + baseline-on-migrate 存量兼容，仅 inventory-service 开迁移权
 - [x] **P2-12 库龄预警落地**（波次1-C + 波次2-G）：`first_inbound_at` 读时算 `stockAgeDays`，预警动态优先/静态回退（stock_age 列保留兼容）
 - [x] **P2-13 架构定位文档**（决策 3 已拍板：模块化可插拔开源项目；ARCHITECTURE.md 落地，含模块地图/插拔点清单/部署形态/扩展指南）
-- [x] **P2-14 分环境配置**（波次1-B）：`application-prod.yml` ×2（无默认值样板）+ 默认 URL `characterEncoding=utf8mb4` 修正
+- [x] **P2-14 分环境配置**（波次1-B）：`application-prod.yml` ×2（无默认值样板）+ 默认 URL `characterEncoding=utf8` 修正（Connector/J 只认 Java 字符集名，`utf8mb4` 会导致 Unsupported character encoding 启动失败——冒烟测试发现并修复）
 - [x] **P2-15 CORS 下沉网关**（波次1-B）：网关 `allowedOriginPatterns` 走 `CORS_ORIGINS`（逗号分隔，Binder 拆 List）；两服务保留 dev 直连用 CORS 同源同变量；运行期绑定验证列入上线 checklist
 
 ## 三、上线 Checklist
@@ -148,6 +148,12 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 
 - **H 架构定位文档 ✅（波次3）**：ARCHITECTURE.md 155 行（定位声明/模块地图/可插拔点清单 5 项/部署形态/扩展指南 6 步/开源协作约定）+ README 架构定位小节；
   组长事实抽查通过：app.auth.enabled 头契约开关（yml+Filter @Value）、单测 79 条分布表、V1 冻结纪律均与实况一致
+
+### 首次启动冒烟（✅ 2026-08-17，组长执行）
+- **真实 MySQL 8.0 上成功启动 + Flyway V1 执行成功**（`now at version v1`，297 行 DDL 首次真机验证通过）——这是项目第一次被证明"运行正确"，此前仅编译+单测
+- 接口冒烟全通过：health=UP；无身份头 → HTTP 401（RBAC 拦截）；带 ADMIN 头列表 → 200 + V1 种子数据；POST 建单 → `IN20260817001`（原子取号真机工作）+ 库存联动建行 + 库龄预警真实触发（电解铜 16 天>15 阈值 warn=true）
+- **发现并修复真实 bug**：`characterEncoding=utf8mb4` 是非法值（Connector/J 8.x 只认 Java 字符集名），启动即 `Unsupported character encoding`；改为 `characterEncoding=utf8`（MySQL 8 服务端默认即 utf8mb4）。4 处：两服务 application.yml + README + 本计划文档。**该 bug 编译/单测均无法发现，仅真机启动暴露**
+- 构建加速：新增 `mvn-settings.xml`（阿里云 central 镜像），下载从 3~17 KB/s 提升至 165 KB/s~2.7 MB/s
 
 ### 组长终验结论（2026-08-17）
 - 改造清单中 **P0 全部、P1 全部、P2 除 P2-10/P2-13 外全部完成**，均有代码 + 测试 + 构建证据

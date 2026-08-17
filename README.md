@@ -80,7 +80,7 @@ java -jar ximu-safe-stock-service/target/ximu-safe-stock-service-1.0-SNAPSHOT.ja
 
 | 环境变量 | 含义 | 示例 | 必须性 |
 |----------|------|------|--------|
-| DB_URL | MySQL 连接串（含库名、字符集、时区） | jdbc:mysql://db.internal:3306/ximu?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8mb4 | 生产必须（prod 无默认值） |
+| DB_URL | MySQL 连接串（含库名、字符集、时区） | jdbc:mysql://db.internal:3306/ximu?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8 | 生产必须（prod 无默认值） |
 | DB_USERNAME | 数据库账号 | ximu_app | 生产必须（prod 无默认值） |
 | DB_PASSWORD | 数据库密码 | （强随机密码） | 生产必须（prod 无默认值） |
 | JWT_SECRET | JWT 签名密钥（仅网关使用） | （>=32 字节随机串） | 生产必须（网关默认值仅本地开发兜底） |
