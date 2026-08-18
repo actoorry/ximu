@@ -1,8 +1,10 @@
 # =============================================================================
 # 生产部署安全警告（IMPORTANT）
 # -----------------------------------------------------------------------------
-# 生产必须通过环境变量注入 JWT_SECRET（>=32 字节随机串，可用 openssl rand -base64 48 生成），
-# 严禁使用下方默认值；默认值仅为本地开发兜底。
+# 本文件不提供任何密钥兜底值（P0-2，fail-closed）：缺 JWT_SECRET / GATEWAY_TOKEN
+# 环境变量时启动直接失败。生产用 --spring.profiles.active=prod（application-prod.yml
+# 全必填项），本地开发用 --spring.profiles.active=dev（application-dev.yml 专用兜底）。
+# 下游服务地址按部署拓扑通过 INVENTORY_SERVICE_URI / SAFE_STOCK_SERVICE_URI 覆盖。
 # CORS 允许来源通过 CORS_ORIGINS 环境变量注入（逗号分隔多个域名）。
 # =============================================================================
 
@@ -16,11 +18,11 @@ spring:
     gateway:
       routes:
         - id: inventory-service
-          uri: http://localhost:8081
+          uri: ${INVENTORY_SERVICE_URI:http://localhost:8081}
           predicates:
             - Path=/api/inventory/**
         - id: safe-stock-service
-          uri: http://localhost:8082
+          uri: ${SAFE_STOCK_SERVICE_URI:http://localhost:8082}
           predicates:
             - Path=/api/safe-stock/**
       globalcors:
@@ -44,11 +46,17 @@ spring:
 
 app:
   jwt:
-    # 生产必须通过环境变量 JWT_SECRET 注入（>=32 字节随机串），禁止使用默认值
-    secret: "${JWT_SECRET:change-me-please-use-a-32-byte-min-secret-key}"
+    # 无兜底值：默认 profile 缺 JWT_SECRET 直接启动失败（P0-2，fail-closed）；
+    # 本地开发用 --spring.profiles.active=dev（application-dev.yml 提供专用兜底密钥）。
+    # 旧默认密钥已进 git 历史视为泄露，生产必须生成新密钥（openssl rand -base64 48）。
+    secret: "${JWT_SECRET}"
+    # 可选签发方/受众校验（P2-4）：注入 JWT_ISSUER / JWT_AUDIENCE 即强制匹配 claims，
+    # 防其他系统签发的同密钥 token 混用；留空不校验（兼容存量签发方，生产建议配置）。
+    issuer: "${JWT_ISSUER:}"
+    audience: "${JWT_AUDIENCE:}"
   # 内部共享令牌：注入 X-Gateway-Token 头，下游服务据此校验请求确经网关（防直连伪造身份）。
-  # 生产必须设置 GATEWAY_TOKEN（与下游服务一致）；本地开发留空则不注入、下游不校验。
-  gateway-token: "${GATEWAY_TOKEN:}"
+  # 无兜底值：缺失即启动失败；与下游服务保持一致（dev profile 兜底 dev-shared-gateway-token）。
+  gateway-token: "${GATEWAY_TOKEN}"
   auth:
     skip-prefixes: "/actuator"
 

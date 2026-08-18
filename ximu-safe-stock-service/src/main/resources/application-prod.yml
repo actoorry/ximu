@@ -8,7 +8,7 @@
 # 与本地开发默认值（application.yml）的关键差异：
 #   1. DB_URL / DB_USERNAME / DB_PASSWORD / CORS_ORIGINS 全部无默认值，
 #      缺失任一环境变量都会在启动时报 "Could not resolve placeholder" 而失败。
-#   2. HikariCP 连接池采用保守值（maximum-pool-size: 30）。
+#   2. HikariCP 按容量规划（20 连接 + keepalive + 泄漏检测，见下方 P2-10 注释）。
 #   3. 关闭 SQL 初始化（spring.sql.init.mode: never），DDL 由 Flyway/Liquibase 或 DBA 管理。
 #   4. 日志级别收紧为 info。
 #
@@ -22,17 +22,31 @@ spring:
     password: "${DB_PASSWORD}"
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
-      maximum-pool-size: 30
+      # P2-10 按容量规划重定：MySQL 默认 max_connections=151，两业务服务各 20 + 运维/监控预留，
+      # 峰值占用约 27%（原 30 与注释"保守值"矛盾且无容量依据）
+      maximum-pool-size: 20
       minimum-idle: 5
       connection-timeout: 30000
       idle-timeout: 600000
       max-lifetime: 1800000
+      # keepalive：每 5min 空闲探测，防防火墙/DB 侧静默掐断长闲置连接（须 < max-lifetime）
+      keepalive-time: 300000
+      # 泄漏检测：连接借出 60s 未归还打 WARN（定位代码泄漏，不中断业务；仅生产开启）
+      leak-detection-threshold: 60000
   sql:
     init:
       mode: never
       encoding: UTF-8
   flyway:
     # 迁移权归 inventory-service（同库 ximu 防双写），本服务显式关闭 Flyway，不参与迁移
+    enabled: false
+
+# P2-3：生产关闭 API 文档端点（与 P0-5 的 public-paths 白名单 404 构成双保险：
+# 白名单挡路由层，此处直接不注册 endpoint，即使白名单误配也不暴露接口清单）
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
     enabled: false
 
 app:

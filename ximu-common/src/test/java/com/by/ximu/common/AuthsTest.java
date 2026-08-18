@@ -137,6 +137,22 @@ class AuthsTest {
                 .hasMessage("未认证");
     }
 
+    /** P2-14：createdBy=null（历史/异常数据）制单人不可追溯，非 ADMIN 一律拒绝（原逻辑静默放行） */
+    @Test
+    void requireNotSelfOrAdmin_单据无创建人_非管理员拒绝() {
+        OperatorContext.set(operator(1L, Role.APPROVER));
+        assertThatThrownBy(() -> Auths.requireNotSelfOrAdmin(null))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("单据缺少创建人信息，仅管理员可审批/审核");
+    }
+
+    /** P2-14：createdBy=null 时 ADMIN 仍可操作（管理员旁路不受影响） */
+    @Test
+    void requireNotSelfOrAdmin_单据无创建人_管理员通过() {
+        OperatorContext.set(operator(1L, Role.ADMIN));
+        assertThatCode(() -> Auths.requireNotSelfOrAdmin(null)).doesNotThrowAnyException();
+    }
+
     // ---------- ForbiddenException（并入本类） ----------
 
     @Test

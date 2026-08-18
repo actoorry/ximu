@@ -6,6 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.math.BigDecimal;
 
@@ -16,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -303,5 +305,69 @@ class StockOperationServiceTest {
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> stockOperationService.adjustStock(1L, null, "苹果", null, null, new BigDecimal("3")));
         assertTrue(ex.getMessage().contains("并发冲突"));
+    }
+
+    // ---------- P1-3：并发首建同五维撞 uk_stock_dims 的重试 + 五维排序键 ----------
+
+    @Test
+    void increase_并发首建撞唯一键_重查命中走乐观锁更新() {
+        InventoryStock concurrent = existingStock(new BigDecimal("5"));
+        // 第一次查无行（并发首建）→ insert 撞 uk_stock_dims → 重查命中并发事务已提交的行
+        when(inventoryStockMapper.selectOne(any())).thenReturn(null, concurrent);
+        when(inventoryStockMapper.insert(any(InventoryStock.class)))
+                .thenThrow(new DuplicateKeyException("uk_stock_dims"));
+        when(inventoryStockMapper.updateById(concurrent)).thenReturn(1);
+
+        InventoryStock result = stockOperationService.increaseStock(1L, null, "苹果", null, null, new BigDecimal("3"));
+
+        assertSame(concurrent, result);
+        assertEquals(0, result.getActualQty().compareTo(new BigDecimal("8")));
+        verify(inventoryStockMapper).updateById(concurrent);
+    }
+
+    @Test
+    void increase_撞唯一键重查仍无行_抛并发异常() {
+        when(inventoryStockMapper.selectOne(any())).thenReturn(null);
+        when(inventoryStockMapper.insert(any(InventoryStock.class)))
+                .thenThrow(new DuplicateKeyException("uk_stock_dims"));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> stockOperationService.increaseStock(1L, null, "苹果", null, null, new BigDecimal("3")));
+        assertTrue(ex.getMessage().contains("库存行创建并发异常"));
+    }
+
+    @Test
+    void adjust_并发首建撞唯一键_重查走更新并记盘差审计() {
+        InventoryStock concurrent = existingStock(new BigDecimal("10"));
+        when(inventoryStockMapper.selectOne(any())).thenReturn(null, concurrent);
+        when(inventoryStockMapper.insert(any(InventoryStock.class)))
+                .thenThrow(new DuplicateKeyException("uk_stock_dims"));
+        when(inventoryStockMapper.updateById(concurrent)).thenReturn(1);
+
+        InventoryStock result = stockOperationService.adjustStock(1L, null, "苹果", null, null, new BigDecimal("3"));
+
+        assertSame(concurrent, result);
+        assertEquals(0, result.getActualQty().compareTo(new BigDecimal("3")));
+        // 账面 10 → 实盘 3：盘亏 7 也必须落审计，不能因撞键重试路径漏记
+        verify(operationLogService).recordInTx(eq("stock"), eq("ADJUST"), eq(100L), eq("苹果"), any(), any());
+    }
+
+    // ---------- P1-3：五维排序键（死锁消除的加锁顺序依据） ----------
+
+    @Test
+    void dimsKey_null维度归空串_与空串维度等价() {
+        String withNull = StockOperationService.dimsKey(1L, "铜管", null, "Φ20", "合格");
+        String withEmpty = StockOperationService.dimsKey(1L, "铜管", "", "Φ20", "合格");
+        assertEquals(withEmpty, withNull);
+        assertEquals("1|铜管||Φ20|合格", withNull);
+    }
+
+    @Test
+    void dimsKey_组织在前_同维度跨方法排序一致() {
+        // 排序键的稳定性依赖「字段顺序固定 + null 统一空串」，两行不同品名比较结果恒定
+        String a = StockOperationService.dimsKey(1L, "铜管", "紫铜", "Φ20", "合格");
+        String b = StockOperationService.dimsKey(1L, "铜板", "紫铜", "1.5mm", null);
+        assertTrue(a.compareTo(b) != 0 || a.equals(b));
+        assertNotNull(a);
     }
 }

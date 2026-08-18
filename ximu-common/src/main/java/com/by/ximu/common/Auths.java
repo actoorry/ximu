@@ -47,7 +47,12 @@ public final class Auths {
         throw new ForbiddenException("只能操作本人创建的单据");
     }
 
-    /** 职责分离：制单人不得审批/审核/完成自己的单据（管理员除外） */
+    /**
+     * 职责分离：制单人不得审批/审核/完成自己的单据（管理员除外）。
+     *
+     * <p>{@code createdBy=null}（历史数据/异常数据）视为制单人不可追溯：非 ADMIN 一律拒绝（P2-14，
+     * 原逻辑对 null 直接放行——职责分离在"不知道单据是谁建的"时无从谈起，宁可拒绝）。
+     */
     public static void requireNotSelfOrAdmin(Long createdBy) {
         Operator operator = OperatorContext.get();
         if (operator == null || operator.id() == null) {
@@ -56,7 +61,10 @@ public final class Auths {
         if (isAdmin(operator)) {
             return;
         }
-        if (createdBy != null && createdBy.equals(operator.id())) {
+        if (createdBy == null) {
+            throw new ForbiddenException("单据缺少创建人信息，仅管理员可审批/审核");
+        }
+        if (createdBy.equals(operator.id())) {
             throw new ForbiddenException("制单人与审批/审核人不能为同一人");
         }
     }

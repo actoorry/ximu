@@ -54,6 +54,10 @@ public class InboundController {
      * 编辑 / 流转入库单。
      *
      * <p>body 含 {@code action} 字段 → 流转（approve/check）；否则普通编辑。
+     * <p>流转不信任请求体身份字段：审核人一律取 OperatorContext 的可信登录人，
+     * {@code checker/auditLevel} 仅保留在 TRANSITION_KEYS 中用于识别旧前端请求形态，值被忽略；
+     * 携带 {@code status} 时必须与 action 目标状态一致，否则 400（P2-16，不再静默忽略）；
+     * auditLevel 保持制单人建单时指定的级别，流转不再覆盖。
      * <p>普通编辑绑定 {@link InboundUpdateRequest} 白名单 DTO，
      * {@code id/status/version/createdBy/时间戳} 等字段即使传入也会被忽略。
      */
@@ -62,14 +66,8 @@ public class InboundController {
         if (isTransition(body)) {
             String action = String.valueOf(body.get("action"));
             switch (action) {
-                case "approve" -> {
-                    String auditLevel = body.get("auditLevel") != null ? String.valueOf(body.get("auditLevel")) : null;
-                    inboundService.approve(id, auditLevel);
-                }
-                case "check" -> {
-                    String checker = body.get("checker") != null ? String.valueOf(body.get("checker")) : null;
-                    inboundService.check(id, checker);
-                }
+                case "approve" -> { requireStatusMatch(body, "approve", "APPROVED"); inboundService.approve(id); }
+                case "check" -> { requireStatusMatch(body, "check", "CHECKED"); inboundService.check(id); }
                 default -> throw new IllegalArgumentException("不支持的流转动作: " + action);
             }
             return Result.ok();
@@ -82,6 +80,13 @@ public class InboundController {
     public Result<Void> delete(@PathVariable Long id) {
         inboundService.deleteWithItems(id);
         return Result.ok();
+    }
+
+    /** 流转请求携带 status 时必须与 action 目标状态一致，否则 400（P2-16：不再静默忽略，防前端误以为已生效） */
+    private static void requireStatusMatch(Map<String, Object> body, String action, String targetStatus) {
+        if (body.containsKey("status") && !targetStatus.equals(body.get("status"))) {
+            throw new IllegalArgumentException("status 与 action 不一致：action=" + action + " 的目标状态为 " + targetStatus);
+        }
     }
 
     private boolean isTransition(Map<String, Object> body) {

@@ -1,10 +1,45 @@
 # =============================================================================
-# 网关生产配置（--spring.profiles.active=prod）
+# 生产环境样板配置（application-prod.yml）
 # -----------------------------------------------------------------------------
-# 与本地开发默认值（application.yml）的关键差异：
-#   1. JWT_SECRET / GATEWAY_TOKEN 无默认值，缺失任一环境变量即启动失败（Could not resolve placeholder）。
-#   2. CORS_ORIGINS 无默认值，生产按真实域名注入，不要回退为 *。
+# 激活方式：java -jar ximu-gateway-*.jar --spring.profiles.active=prod
+# 同名键优先于 application.yml；以下环境变量全部无默认值，缺失任一启动即失败：
+#   - JWT_SECRET            JWT 签名密钥（>=32 字节随机串，openssl rand -base64 48 生成；
+#                           旧默认密钥已进 git 历史视为泄露，必须使用新生成的密钥）
+#   - GATEWAY_TOKEN         网关→下游共享令牌（与两下游服务的 GATEWAY_TOKEN 一致）
+#   - CORS_ORIGINS          允许的前端来源（逗号分隔多个域名，allowCredentials=true 时禁 *）
+# 可选（按部署拓扑覆盖，默认与网关同机的 localhost）：
+#   - INVENTORY_SERVICE_URI / SAFE_STOCK_SERVICE_URI   下游服务地址
 # =============================================================================
+
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: inventory-service
+          uri: ${INVENTORY_SERVICE_URI:http://localhost:8081}
+          predicates:
+            - Path=/api/inventory/**
+        - id: safe-stock-service
+          uri: ${SAFE_STOCK_SERVICE_URI:http://localhost:8082}
+          predicates:
+            - Path=/api/safe-stock/**
+      # CORS 生产必填：allowedOriginPatterns 无默认值，缺失 CORS_ORIGINS 即启动失败
+      globalcors:
+        add-to-simple-url-handler-mapping: true
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: "${CORS_ORIGINS}"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+            allowedHeaders:
+              - "*"
+            allowCredentials: true
+            maxAge: 3600
+
 app:
   jwt:
     secret: "${JWT_SECRET}"

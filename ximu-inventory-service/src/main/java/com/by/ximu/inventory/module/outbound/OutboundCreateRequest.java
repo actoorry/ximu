@@ -2,6 +2,7 @@ package com.by.ximu.inventory.module.outbound;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -37,6 +38,7 @@ public class OutboundCreateRequest {
 
     /** 明细列表（推荐传多行商品） */
     @Valid
+    @Size(max = 200, message = "明细行数不能超过 200")
     private List<OutboundItem> items;
 
     // ===== 兼容旧版单品字段 =====

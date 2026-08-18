@@ -94,10 +94,12 @@ public class OperationLogService extends ServiceImpl<OperationLogMapper, Operati
             wrapper.eq(OperationLog::getTargetId, targetId);
         }
         if (StringUtils.hasText(query.getKeyword())) {
+            // keyword 仅匹配单号/操作人（P1-1）：detail 为整段 JSON 大字段且无索引，
+            // LIKE '%kw%' 全表扫描会随日志量增长线性变慢；内容检索需求应由
+            // 日志平台（ELK 等）承担，不在业务库做。行为变化：keyword 不再命中 detail 内容。
             String kw = query.getKeyword();
             wrapper.and(w -> w.like(OperationLog::getTargetNo, kw)
-                    .or().like(OperationLog::getOperator, kw)
-                    .or().like(OperationLog::getDetail, kw));
+                    .or().like(OperationLog::getOperator, kw));
         }
         wrapper.orderByDesc(OperationLog::getCreatedAt);
         return query.toPageMap(baseMapper.selectPage(buildPage(query), wrapper));

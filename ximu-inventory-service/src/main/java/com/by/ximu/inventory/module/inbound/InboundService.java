@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.by.ximu.common.Auths;
+import com.by.ximu.common.DimsNormalizer;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Role;
@@ -19,6 +20,7 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,10 +78,11 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
     @Transactional
     public InboundDetailVO create(InboundCreateRequest req) {
         Auths.requireRole(Role.CREATOR, Role.ADMIN);
-        // 0. 幂等：requestId 非空时先查重，命中则返回已存在单据（防双击/重试重复建单）
+        // 0. 幂等：requestId 非空时按「requestId + 当前操作人」查重（P1-7：复合幂等键，
+        //    两个用户携带同一 requestId 重试互不串单），命中则返回已存在单据
         String requestId = req.getRequestId();
         if (StringUtils.hasText(requestId)) {
-            Inbound existed = getOne(new LambdaQueryWrapper<Inbound>().eq(Inbound::getRequestId, requestId), false);
+            Inbound existed = findByIdempotent(requestId);
             if (existed != null) {
                 return toVo(existed, listItems(existed.getId()));
             }
@@ -107,7 +110,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
             save(head);
         } catch (DuplicateKeyException e) {
             // 并发下同 requestId 同时插入，唯一索引兜底：返回已存在的单据
-            Inbound existed = getOne(new LambdaQueryWrapper<Inbound>().eq(Inbound::getRequestId, requestId), false);
+            Inbound existed = findByIdempotent(requestId);
             if (existed != null) {
                 return toVo(existed, listItems(existed.getId()));
             }
@@ -126,10 +129,12 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
     }
 
     /**
-     * 批准：CREATED → APPROVED，并记录审核级别。
+     * 批准：CREATED → APPROVED。
+     *
+     * <p>审核级别（auditLevel）为制单人建单/编辑时指定的业务字段，流转不再接受请求体覆盖（P0-1）。
      */
     @Transactional
-    public void approve(Long id, String auditLevel) {
+    public void approve(Long id) {
         Inbound inbound = getById(id);
         if (inbound == null) {
             throw new IllegalArgumentException("入库单不存在: " + id);
@@ -140,19 +145,20 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
             throw new IllegalStateException("当前状态[" + inbound.getStatus() + "]不允许批准，仅 CREATED 状态可批准");
         }
         inbound.setStatus("APPROVED");
-        inbound.setAuditLevel(auditLevel);
         if (!updateById(inbound)) {
             throw new IllegalStateException("单据已被他人操作，请刷新重试");
         }
         operationLogService.recordInTx("inbound", "APPROVE", id, inbound.getInboundNo(), OperatorContext.getOperatorName(),
-                Map.of("auditLevel", auditLevel == null ? "" : auditLevel));
+                Map.of("auditLevel", inbound.getAuditLevel() == null ? "" : inbound.getAuditLevel()));
     }
 
     /**
-     * 审核：APPROVED → CHECKED，并记录审核人；按明细逐行联动增加库存。
+     * 审核：APPROVED → CHECKED，审核人取可信登录人；按明细逐行联动增加库存。
+     *
+     * <p>审核人不信任请求体（P0-1），一律取 {@link OperatorContext#getOperatorName()}。
      */
     @Transactional
-    public void check(Long id, String checker) {
+    public void check(Long id) {
         Inbound inbound = getById(id);
         if (inbound == null) {
             throw new IllegalArgumentException("入库单不存在: " + id);
@@ -162,22 +168,47 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         if (!"APPROVED".equals(inbound.getStatus())) {
             throw new IllegalStateException("当前状态[" + inbound.getStatus() + "]不允许审核，仅 APPROVED 状态可审核");
         }
+        String checker = requireOperatorName();
         inbound.setStatus("CHECKED");
         inbound.setChecker(checker);
         if (!updateById(inbound)) {
             throw new IllegalStateException("单据已被他人操作，请刷新重试");
         }
-        // 库存联动：按明细逐行增加库存（settle_qty 优先，无则用 qty）
-        for (InboundItem it : listItems(id)) {
+        // 库存联动：按明细逐行增加库存（settle_qty 优先，无则用 qty）；
+        // 先按五维键排序再联动（P1-3），保证并发审核不同单据时对 inventory_stock 以一致行序加锁，消除交叉死锁
+        List<InboundItem> items = listItems(id);
+        items.sort(Comparator.comparing(it -> StockOperationService.dimsKey(
+                it.getOrgId(), it.getProductName(), it.getMaterial(), it.getSpec(), it.getGrade())));
+        for (InboundItem it : items) {
             BigDecimal qty = it.getSettleQty() != null ? it.getSettleQty() : it.getQty();
             stockOperationService.increaseStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getMaterial(), it.getSpec(), qty);
         }
         operationLogService.recordInTx("inbound", "CHECK", id, inbound.getInboundNo(), OperatorContext.getOperatorName(),
-                Map.of("checker", checker == null ? "" : checker));
+                Map.of("checker", checker));
+    }
+
+    /** 审核人必须来自可信登录上下文；缺失说明过滤器链异常，宁可拒绝落库也不写空值/伪造值 */
+    private String requireOperatorName() {
+        String name = OperatorContext.getOperatorName();
+        if (name == null || name.isBlank()) {
+            throw new IllegalStateException("操作人上下文缺失，无法记录审核人");
+        }
+        return name;
+    }
+
+    /** 幂等回查：requestId + 当前操作人（P1-7 复合幂等键；操作人缺失时退化为仅 requestId，与历史行为一致） */
+    private Inbound findByIdempotent(String requestId) {
+        Long operatorId = OperatorContext.getOperatorId();
+        return getOne(new LambdaQueryWrapper<Inbound>()
+                .eq(Inbound::getRequestId, requestId)
+                .eq(operatorId != null, Inbound::getCreatedBy, operatorId), false);
     }
 
     /**
-     * 级联删除：先删明细，再删头（同事务）。
+     * 级联删除：先按「id + CREATED 状态」条件删头，再删明细（同事务）。
+     *
+     * <p>条件删除（P0-3）：防止「读到 CREATED → 并发流转（状态变、库存已联动）→ 仍删除」的 TOCTOU 竞态。
+     * 状态条件足以阻断窗口（任何流转必改 status），影响 0 行即并发冲突抛异常，明细删除随之回滚。
      */
     @Transactional
     public void deleteWithItems(Long id) {
@@ -185,17 +216,21 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
             return;
         }
         Inbound head = getById(id);
-        if (head != null && !"CREATED".equals(head.getStatus())) {
+        if (head == null) {
+            return;
+        }
+        if (!"CREATED".equals(head.getStatus())) {
             throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
         }
-        if (head != null) {
-            Auths.requireCreatorOrAdmin(head.getCreatedBy());
+        Auths.requireCreatorOrAdmin(head.getCreatedBy());
+        int deleted = baseMapper.delete(new LambdaQueryWrapper<Inbound>()
+                .eq(Inbound::getId, id)
+                .eq(Inbound::getStatus, "CREATED"));
+        if (deleted == 0) {
+            throw new IllegalStateException("单据状态已变化或已被他人操作，删除失败，请刷新重试");
         }
         inboundItemMapper.delete(new LambdaQueryWrapper<InboundItem>().eq(InboundItem::getInboundId, id));
-        removeById(id);
-        if (head != null) {
-            operationLogService.recordInTx("inbound", "DELETE", id, head.getInboundNo(), OperatorContext.getOperatorName(), null);
-        }
+        operationLogService.recordInTx("inbound", "DELETE", id, head.getInboundNo(), OperatorContext.getOperatorName(), null);
     }
 
     /**
@@ -253,7 +288,12 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
 
     // ===== 内部方法 =====
 
-    /** 兼容旧单品字段：items 为空且传了 productName 时，转成一条明细 */
+    /**
+     * 兼容旧单品字段：items 为空且传了 productName 时，转成一条明细。
+     *
+     * <p>出口统一做五维归一化（P1-4）：品名/物料/规格/等级 trim + 全角转半角后落库，
+     * 消除「" 铜管" 与 "铜管"」类不可见差异在联动时 miss 五维匹配、裂变出新库存行。
+     */
     private List<InboundItem> normalizeItems(InboundCreateRequest req) {
         List<InboundItem> items = req.getItems();
         if ((items == null || items.isEmpty()) && StringUtils.hasText(req.getProductName())) {
@@ -266,7 +306,15 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
             single.setGrade(req.getGrade());
             single.setQty(req.getQty());
             single.setSettleQty(req.getSettleQty());
-            return new ArrayList<>(List.of(single));
+            items = new ArrayList<>(List.of(single));
+        }
+        if (items != null) {
+            for (InboundItem it : items) {
+                it.setProductName(DimsNormalizer.normalize(it.getProductName()));
+                it.setMaterial(DimsNormalizer.normalize(it.getMaterial()));
+                it.setSpec(DimsNormalizer.normalize(it.getSpec()));
+                it.setGrade(DimsNormalizer.normalize(it.getGrade()));
+            }
         }
         return items;
     }

@@ -1,9 +1,11 @@
 package com.by.ximu.inventory.module.stock;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.by.ximu.common.DimsNormalizer;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.inventory.module.log.OperationLogService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -36,6 +38,9 @@ public class StockOperationService {
     /**
      * 入库：{@code actual_qty += qty}；无匹配库存行则新建。
      *
+     * <p>并发首建同五维时 insert 撞 {@code uk_stock_dims}（P1-3）：MySQL 唯一键冲突仅回滚当前语句，
+     * 不作废事务，此处重查后走乐观锁更新路径，消除「并发首次入库 = 裸 500」。
+     *
      * @return 被更新的库存行（qty 为 0 或 null 时返回 null，不产生库存变化）
      */
     @Transactional
@@ -48,16 +53,27 @@ public class StockOperationService {
         if (qty.signum() < 0) {
             throw new IllegalArgumentException("入库数量必须为正数: " + qty);
         }
+        grade = DimsNormalizer.normalize(grade);
+        productName = DimsNormalizer.normalize(productName);
+        material = DimsNormalizer.normalize(material);
+        spec = DimsNormalizer.normalize(spec);
         InventoryStock stock = findStock(orgId, grade, productName, material, spec);
         if (stock == null) {
-            stock = newStock(orgId, grade, productName, material, spec, qty);
-            inventoryStockMapper.insert(stock);
-        } else {
-            BigDecimal now = stock.getActualQty() == null ? BigDecimal.ZERO : stock.getActualQty();
-            stock.setActualQty(now.add(qty));
-            if (inventoryStockMapper.updateById(stock) == 0) {
-                throw new IllegalStateException("库存并发冲突，请重试（入库）");
+            InventoryStock created = newStock(orgId, grade, productName, material, spec, qty);
+            try {
+                inventoryStockMapper.insert(created);
+                return created;
+            } catch (DuplicateKeyException e) {
+                stock = findStock(orgId, grade, productName, material, spec);
+                if (stock == null) {
+                    throw new IllegalStateException("库存行创建并发异常，请重试", e);
+                }
             }
+        }
+        BigDecimal now = stock.getActualQty() == null ? BigDecimal.ZERO : stock.getActualQty();
+        stock.setActualQty(now.add(qty));
+        if (inventoryStockMapper.updateById(stock) == 0) {
+            throw new IllegalStateException("库存并发冲突，请重试（入库）");
         }
         return stock;
     }
@@ -77,6 +93,10 @@ public class StockOperationService {
         if (qty.signum() < 0) {
             throw new IllegalArgumentException("出库数量必须为正数: " + qty);
         }
+        grade = DimsNormalizer.normalize(grade);
+        productName = DimsNormalizer.normalize(productName);
+        material = DimsNormalizer.normalize(material);
+        spec = DimsNormalizer.normalize(spec);
         InventoryStock stock = findStock(orgId, grade, productName, material, spec);
         BigDecimal available = stock == null || stock.getActualQty() == null
                 ? BigDecimal.ZERO : stock.getActualQty();
@@ -97,6 +117,8 @@ public class StockOperationService {
     /**
      * 盘点：{@code actual_qty = actualQty}（直接校正到实盘值）；无匹配库存行则新建。
      *
+     * <p>并发首建同五维时 insert 撞 {@code uk_stock_dims}（P1-3）：重查后走乐观锁更新路径。
+     *
      * @return 被更新的库存行（actualQty 为 null 时返回 null，不产生库存变化）
      */
     @Transactional
@@ -109,25 +131,47 @@ public class StockOperationService {
         if (actualQty.signum() < 0) {
             throw new IllegalArgumentException("盘点实盘数量不能为负: " + actualQty);
         }
+        grade = DimsNormalizer.normalize(grade);
+        productName = DimsNormalizer.normalize(productName);
+        material = DimsNormalizer.normalize(material);
+        spec = DimsNormalizer.normalize(spec);
         InventoryStock stock = findStock(orgId, grade, productName, material, spec);
         if (stock == null) {
-            stock = newStock(orgId, grade, productName, material, spec, actualQty);
-            inventoryStockMapper.insert(stock);
-        } else {
-            BigDecimal before = stock.getActualQty() == null ? BigDecimal.ZERO : stock.getActualQty();
-            stock.setActualQty(actualQty);
-            if (inventoryStockMapper.updateById(stock) == 0) {
-                throw new IllegalStateException("库存并发冲突，请重试（盘点）");
-            }
-            // 盘盈盘亏流水：账面与实盘差异落审计（正值盘盈、负值盘亏）
-            BigDecimal diff = actualQty.subtract(before);
-            if (diff.signum() != 0) {
-                operationLogService.recordInTx("stock", "ADJUST", stock.getId(), productName,
-                        OperatorContext.getOperatorName(),
-                        Map.of("before", before, "after", actualQty, "diff", diff));
+            InventoryStock created = newStock(orgId, grade, productName, material, spec, actualQty);
+            try {
+                inventoryStockMapper.insert(created);
+                return created;
+            } catch (DuplicateKeyException e) {
+                stock = findStock(orgId, grade, productName, material, spec);
+                if (stock == null) {
+                    throw new IllegalStateException("库存行创建并发异常，请重试", e);
+                }
             }
         }
+        BigDecimal before = stock.getActualQty() == null ? BigDecimal.ZERO : stock.getActualQty();
+        stock.setActualQty(actualQty);
+        if (inventoryStockMapper.updateById(stock) == 0) {
+            throw new IllegalStateException("库存并发冲突，请重试（盘点）");
+        }
+        // 盘盈盘亏流水：账面与实盘差异落审计（正值盘盈、负值盘亏）
+        BigDecimal diff = actualQty.subtract(before);
+        if (diff.signum() != 0) {
+            operationLogService.recordInTx("stock", "ADJUST", stock.getId(), productName,
+                    OperatorContext.getOperatorName(),
+                    Map.of("before", before, "after", actualQty, "diff", diff));
+        }
         return stock;
+    }
+
+    /**
+     * 五维排序键（P1-3）：明细联动前按此键排序，保证并发事务以相同行序对 {@code inventory_stock} 加锁，
+     * 消除「事务 A 先锁铜再锁铝、事务 B 先锁铝再锁铜」的交叉死锁。
+     */
+    public static String dimsKey(Long orgId, String productName, String material, String spec, String grade) {
+        return orgId + "|" + (productName == null ? "" : productName)
+                + "|" + (material == null ? "" : material)
+                + "|" + (spec == null ? "" : spec)
+                + "|" + (grade == null ? "" : grade);
     }
 
     /** 组织维度为空时拒绝，避免五维键缺失导致错配 */

@@ -1,7 +1,9 @@
 package com.by.ximu.inventory.module.log;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import com.fasterxml.jackson.annotation.JsonFormat;
@@ -33,6 +35,10 @@ public class OperationLog {
 
     /** 操作人 */
     private String operator;
+
+    /** 操作人用户ID（P2-5：姓名可重名/可改名，ID 才是唯一审计锚点；由 MetaObjectHandler 自动填充） */
+    @TableField(fill = FieldFill.INSERT)
+    private Long operatorId;
 
     /** 操作详情（JSON 文本） */
     private String detail;

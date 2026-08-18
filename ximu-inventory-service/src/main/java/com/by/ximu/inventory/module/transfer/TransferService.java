@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.by.ximu.common.Auths;
+import com.by.ximu.common.DimsNormalizer;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Role;
@@ -74,9 +75,10 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
     @Transactional
     public TransferDetailVO create(TransferCreateRequest req) {
         Auths.requireRole(Role.CREATOR, Role.ADMIN);
+        // 幂等：requestId 非空时按「requestId + 当前操作人」查重（P1-7：复合幂等键）
         String requestId = req.getRequestId();
         if (StringUtils.hasText(requestId)) {
-            Transfer existed = getOne(new LambdaQueryWrapper<Transfer>().eq(Transfer::getRequestId, requestId), false);
+            Transfer existed = findByIdempotent(requestId);
             if (existed != null) {
                 return toVo(existed, listItems(existed.getId()));
             }
@@ -97,7 +99,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
         try {
             save(head);
         } catch (DuplicateKeyException e) {
-            Transfer existed = getOne(new LambdaQueryWrapper<Transfer>().eq(Transfer::getRequestId, requestId), false);
+            Transfer existed = findByIdempotent(requestId);
             if (existed != null) {
                 return toVo(existed, listItems(existed.getId()));
             }
@@ -159,7 +161,10 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
     }
 
     /**
-     * 级联删除：先删明细，再删头（同事务）。
+     * 级联删除：先按「id + CREATED 状态」条件删头，再删明细（同事务）。
+     *
+     * <p>条件删除（P0-3）：防止「读到 CREATED → 并发流转（状态变、库存已联动）→ 仍删除」的 TOCTOU 竞态。
+     * 状态条件足以阻断窗口（任何流转必改 status），影响 0 行即并发冲突抛异常，明细删除随之回滚。
      */
     @Transactional
     public void deleteWithItems(Long id) {
@@ -167,17 +172,21 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
             return;
         }
         Transfer head = getById(id);
-        if (head != null && !"CREATED".equals(head.getStatus())) {
+        if (head == null) {
+            return;
+        }
+        if (!"CREATED".equals(head.getStatus())) {
             throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
         }
-        if (head != null) {
-            Auths.requireCreatorOrAdmin(head.getCreatedBy());
+        Auths.requireCreatorOrAdmin(head.getCreatedBy());
+        int deleted = baseMapper.delete(new LambdaQueryWrapper<Transfer>()
+                .eq(Transfer::getId, id)
+                .eq(Transfer::getStatus, "CREATED"));
+        if (deleted == 0) {
+            throw new IllegalStateException("单据状态已变化或已被他人操作，删除失败，请刷新重试");
         }
         transferItemMapper.delete(new LambdaQueryWrapper<TransferItem>().eq(TransferItem::getTransferId, id));
-        removeById(id);
-        if (head != null) {
-            operationLogService.recordInTx("transfer", "DELETE", id, head.getTransferNo(), OperatorContext.getOperatorName(), null);
-        }
+        operationLogService.recordInTx("transfer", "DELETE", id, head.getTransferNo(), OperatorContext.getOperatorName(), null);
     }
 
     /**
@@ -226,6 +235,20 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
 
     // ===== 内部方法 =====
 
+    /** 幂等回查：requestId + 当前操作人（P1-7 复合幂等键；操作人缺失时退化为仅 requestId，与历史行为一致） */
+    private Transfer findByIdempotent(String requestId) {
+        Long operatorId = OperatorContext.getOperatorId();
+        return getOne(new LambdaQueryWrapper<Transfer>()
+                .eq(Transfer::getRequestId, requestId)
+                .eq(operatorId != null, Transfer::getCreatedBy, operatorId), false);
+    }
+
+    /**
+     * 兼容旧单品字段：items 为空但传了旧单品字段时，转成一条明细。
+     *
+     * <p>出口统一做五维归一化（P1-4）：品名/物料/规格/等级 trim + 全角转半角后落库，
+     * 保持与库存账本同一套归一规则（调拨明细虽不联动库存，但品名维度仍是后续对账依据）。
+     */
     private List<TransferItem> normalizeItems(TransferCreateRequest req) {
         List<TransferItem> items = req.getItems();
         boolean hasLegacy = StringUtils.hasText(req.getProductName())
@@ -241,7 +264,15 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
             single.setGrade(req.getGrade());
             single.setQty(req.getQty());
             single.setTargetLocation(req.getTargetLocation());
-            return new ArrayList<>(List.of(single));
+            items = new ArrayList<>(List.of(single));
+        }
+        if (items != null) {
+            for (TransferItem it : items) {
+                it.setProductName(DimsNormalizer.normalize(it.getProductName()));
+                it.setMaterial(DimsNormalizer.normalize(it.getMaterial()));
+                it.setSpec(DimsNormalizer.normalize(it.getSpec()));
+                it.setGrade(DimsNormalizer.normalize(it.getGrade()));
+            }
         }
         return items;
     }

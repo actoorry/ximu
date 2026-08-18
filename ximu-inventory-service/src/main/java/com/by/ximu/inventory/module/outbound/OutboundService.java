@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.by.ximu.common.Auths;
+import com.by.ximu.common.DimsNormalizer;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Role;
@@ -19,6 +20,7 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -73,10 +75,11 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
     @Transactional
     public OutboundDetailVO create(OutboundCreateRequest req) {
         Auths.requireRole(Role.CREATOR, Role.ADMIN);
-        // 幂等：requestId 非空时先查重，命中则返回已存在单据
+        // 幂等：requestId 非空时按「requestId + 当前操作人」查重（P1-7：复合幂等键），
+        // 命中则返回已存在单据
         String requestId = req.getRequestId();
         if (StringUtils.hasText(requestId)) {
-            Outbound existed = getOne(new LambdaQueryWrapper<Outbound>().eq(Outbound::getRequestId, requestId), false);
+            Outbound existed = findByIdempotent(requestId);
             if (existed != null) {
                 return toVo(existed, listItems(existed.getId()));
             }
@@ -102,7 +105,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
         try {
             save(head);
         } catch (DuplicateKeyException e) {
-            Outbound existed = getOne(new LambdaQueryWrapper<Outbound>().eq(Outbound::getRequestId, requestId), false);
+            Outbound existed = findByIdempotent(requestId);
             if (existed != null) {
                 return toVo(existed, listItems(existed.getId()));
             }
@@ -137,15 +140,22 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
         if (!updateById(outbound)) {
             throw new IllegalStateException("单据已被他人操作，请刷新重试");
         }
-        // 库存联动：按明细逐行扣减
-        for (OutboundItem it : listItems(id)) {
+        // 库存联动：按明细逐行扣减；先按五维键排序（P1-3），
+        // 保证并发批准不同单据时对 inventory_stock 以一致行序加锁，消除交叉死锁
+        List<OutboundItem> items = listItems(id);
+        items.sort(Comparator.comparing(it -> StockOperationService.dimsKey(
+                it.getOrgId(), it.getProductName(), it.getMaterial(), it.getSpec(), it.getGrade())));
+        for (OutboundItem it : items) {
             stockOperationService.decreaseStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getMaterial(), it.getSpec(), it.getQty());
         }
         operationLogService.recordInTx("outbound", "APPROVE", id, outbound.getOutboundNo(), OperatorContext.getOperatorName(), null);
     }
 
     /**
-     * 级联删除：先删明细，再删头（同事务）。
+     * 级联删除：先按「id + CREATED 状态」条件删头，再删明细（同事务）。
+     *
+     * <p>条件删除（P0-3）：防止「读到 CREATED → 并发流转（状态变、库存已扣减）→ 仍删除」的 TOCTOU 竞态。
+     * 状态条件足以阻断窗口（任何流转必改 status），影响 0 行即并发冲突抛异常，明细删除随之回滚。
      */
     @Transactional
     public void deleteWithItems(Long id) {
@@ -153,17 +163,21 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
             return;
         }
         Outbound head = getById(id);
-        if (head != null && !"CREATED".equals(head.getStatus())) {
+        if (head == null) {
+            return;
+        }
+        if (!"CREATED".equals(head.getStatus())) {
             throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
         }
-        if (head != null) {
-            Auths.requireCreatorOrAdmin(head.getCreatedBy());
+        Auths.requireCreatorOrAdmin(head.getCreatedBy());
+        int deleted = baseMapper.delete(new LambdaQueryWrapper<Outbound>()
+                .eq(Outbound::getId, id)
+                .eq(Outbound::getStatus, "CREATED"));
+        if (deleted == 0) {
+            throw new IllegalStateException("单据状态已变化或已被他人操作，删除失败，请刷新重试");
         }
         outboundItemMapper.delete(new LambdaQueryWrapper<OutboundItem>().eq(OutboundItem::getOutboundId, id));
-        removeById(id);
-        if (head != null) {
-            operationLogService.recordInTx("outbound", "DELETE", id, head.getOutboundNo(), OperatorContext.getOperatorName(), null);
-        }
+        operationLogService.recordInTx("outbound", "DELETE", id, head.getOutboundNo(), OperatorContext.getOperatorName(), null);
     }
 
     /**
@@ -225,8 +239,22 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
                 new LambdaQueryWrapper<OutboundItem>().eq(OutboundItem::getOutboundId, outboundId));
     }
 
+    /** 幂等回查：requestId + 当前操作人（P1-7 复合幂等键；操作人缺失时退化为仅 requestId，与历史行为一致） */
+    private Outbound findByIdempotent(String requestId) {
+        Long operatorId = OperatorContext.getOperatorId();
+        return getOne(new LambdaQueryWrapper<Outbound>()
+                .eq(Outbound::getRequestId, requestId)
+                .eq(operatorId != null, Outbound::getCreatedBy, operatorId), false);
+    }
+
     // ===== 内部方法 =====
 
+    /**
+     * 兼容旧单品字段：items 为空且传了 productName 时，转成一条明细。
+     *
+     * <p>出口统一做五维归一化（P1-4）：品名/物料/规格/等级 trim + 全角转半角后落库，
+     * 消除不可见差异在联动时 miss 五维匹配、裂变出新库存行。
+     */
     private List<OutboundItem> normalizeItems(OutboundCreateRequest req) {
         List<OutboundItem> items = req.getItems();
         if ((items == null || items.isEmpty()) && StringUtils.hasText(req.getProductName())) {
@@ -238,7 +266,15 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
             single.setProductName(req.getProductName());
             single.setGrade(req.getGrade());
             single.setQty(req.getQty());
-            return new ArrayList<>(List.of(single));
+            items = new ArrayList<>(List.of(single));
+        }
+        if (items != null) {
+            for (OutboundItem it : items) {
+                it.setProductName(DimsNormalizer.normalize(it.getProductName()));
+                it.setMaterial(DimsNormalizer.normalize(it.getMaterial()));
+                it.setSpec(DimsNormalizer.normalize(it.getSpec()));
+                it.setGrade(DimsNormalizer.normalize(it.getGrade()));
+            }
         }
         return items;
     }

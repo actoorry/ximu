@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.by.ximu.common.Auths;
+import com.by.ximu.common.DimsNormalizer;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Role;
@@ -19,6 +20,7 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,9 +78,10 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
     @Transactional
     public CheckDetailVO create(CheckCreateRequest req) {
         Auths.requireRole(Role.CREATOR, Role.ADMIN);
+        // 幂等：requestId 非空时按「requestId + 当前操作人」查重（P1-7：复合幂等键）
         String requestId = req.getRequestId();
         if (StringUtils.hasText(requestId)) {
-            InventoryCheck existed = getOne(new LambdaQueryWrapper<InventoryCheck>().eq(InventoryCheck::getRequestId, requestId), false);
+            InventoryCheck existed = findByIdempotent(requestId);
             if (existed != null) {
                 return toVo(existed, listItems(existed.getId()));
             }
@@ -99,7 +102,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         try {
             save(head);
         } catch (DuplicateKeyException e) {
-            InventoryCheck existed = getOne(new LambdaQueryWrapper<InventoryCheck>().eq(InventoryCheck::getRequestId, requestId), false);
+            InventoryCheck existed = findByIdempotent(requestId);
             if (existed != null) {
                 return toVo(existed, listItems(existed.getId()));
             }
@@ -151,19 +154,35 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         if (!"APPROVED".equals(check.getStatus())) {
             throw new IllegalStateException("当前状态[" + check.getStatus() + "]不允许审核，仅 APPROVED 状态可审核");
         }
+        // 实盘数量必填校验（P1-2）：actualQty 为 null 的明细在校正联动时会被静默跳过，
+        // 造成「盘点单已审核、库存却没盘」的假完成；审核前统一拒绝，让制单人补全后重新提交
+        List<CheckItem> items = listItems(id);
+        for (CheckItem it : items) {
+            if (it.getActualQty() == null) {
+                throw new IllegalStateException("存在未填写实盘数量(actualQty)的明细: "
+                        + it.getProductName() + (StringUtils.hasText(it.getSpec()) ? "/" + it.getSpec() : "")
+                        + "，请补全后再审核");
+            }
+        }
         check.setStatus("CHECKED");
         if (!updateById(check)) {
             throw new IllegalStateException("单据已被他人操作，请刷新重试");
         }
-        // 库存联动：按明细逐行校正到实盘数量
-        for (CheckItem it : listItems(id)) {
+        // 库存联动：按明细逐行校正到实盘数量；先按五维键排序（P1-3），
+        // 保证并发审核不同盘点单时对 inventory_stock 以一致行序加锁，消除交叉死锁
+        items.sort(Comparator.comparing(it -> StockOperationService.dimsKey(
+                it.getOrgId(), it.getProductName(), it.getMaterial(), it.getSpec(), it.getGrade())));
+        for (CheckItem it : items) {
             stockOperationService.adjustStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getMaterial(), it.getSpec(), it.getActualQty());
         }
         operationLogService.recordInTx("check", "CHECK", id, check.getCheckNo(), OperatorContext.getOperatorName(), null);
     }
 
     /**
-     * 级联删除：先删明细，再删头（同事务）。
+     * 级联删除：先按「id + CREATED 状态」条件删头，再删明细（同事务）。
+     *
+     * <p>条件删除（P0-3）：防止「读到 CREATED → 并发流转（状态变、库存已校正）→ 仍删除」的 TOCTOU 竞态。
+     * 状态条件足以阻断窗口（任何流转必改 status），影响 0 行即并发冲突抛异常，明细删除随之回滚。
      */
     @Transactional
     public void deleteWithItems(Long id) {
@@ -171,17 +190,21 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
             return;
         }
         InventoryCheck head = getById(id);
-        if (head != null && !"CREATED".equals(head.getStatus())) {
+        if (head == null) {
+            return;
+        }
+        if (!"CREATED".equals(head.getStatus())) {
             throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
         }
-        if (head != null) {
-            Auths.requireCreatorOrAdmin(head.getCreatedBy());
+        Auths.requireCreatorOrAdmin(head.getCreatedBy());
+        int deleted = baseMapper.delete(new LambdaQueryWrapper<InventoryCheck>()
+                .eq(InventoryCheck::getId, id)
+                .eq(InventoryCheck::getStatus, "CREATED"));
+        if (deleted == 0) {
+            throw new IllegalStateException("单据状态已变化或已被他人操作，删除失败，请刷新重试");
         }
         checkItemMapper.delete(new LambdaQueryWrapper<CheckItem>().eq(CheckItem::getCheckId, id));
-        removeById(id);
-        if (head != null) {
-            operationLogService.recordInTx("check", "DELETE", id, head.getCheckNo(), OperatorContext.getOperatorName(), null);
-        }
+        operationLogService.recordInTx("check", "DELETE", id, head.getCheckNo(), OperatorContext.getOperatorName(), null);
     }
 
     /**
@@ -230,7 +253,20 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
 
     // ===== 内部方法 =====
 
-    /** 兼容旧单品字段：items 为空且传了 actualQty 时，转成一条明细 */
+    /** 幂等回查：requestId + 当前操作人（P1-7 复合幂等键；操作人缺失时退化为仅 requestId，与历史行为一致） */
+    private InventoryCheck findByIdempotent(String requestId) {
+        Long operatorId = OperatorContext.getOperatorId();
+        return getOne(new LambdaQueryWrapper<InventoryCheck>()
+                .eq(InventoryCheck::getRequestId, requestId)
+                .eq(operatorId != null, InventoryCheck::getCreatedBy, operatorId), false);
+    }
+
+    /**
+     * 兼容旧单品字段：items 为空且传了 actualQty 时，转成一条明细。
+     *
+     * <p>出口统一做五维归一化（P1-4）：品名/物料/规格/等级 trim + 全角转半角后落库，
+     * 消除不可见差异在联动时 miss 五维匹配、裂变出新库存行。
+     */
     private List<CheckItem> normalizeItems(CheckCreateRequest req) {
         List<CheckItem> items = req.getItems();
         if ((items == null || items.isEmpty()) && req.getActualQty() != null) {
@@ -243,7 +279,15 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
             single.setGrade(req.getGrade());
             single.setSpec(req.getSpec());
             single.setActualQty(req.getActualQty());
-            return new ArrayList<>(List.of(single));
+            items = new ArrayList<>(List.of(single));
+        }
+        if (items != null) {
+            for (CheckItem it : items) {
+                it.setProductName(DimsNormalizer.normalize(it.getProductName()));
+                it.setMaterial(DimsNormalizer.normalize(it.getMaterial()));
+                it.setSpec(DimsNormalizer.normalize(it.getSpec()));
+                it.setGrade(DimsNormalizer.normalize(it.getGrade()));
+            }
         }
         return items;
     }

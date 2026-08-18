@@ -1,5 +1,6 @@
 package com.by.ximu.inventory.module.stock;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -54,6 +55,10 @@ public class InventoryStock {
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime updatedAt;
+
+    /** 最后修改人ID（P2-5，MetaObjectHandler 从登录上下文自动填充） */
+    @TableField(fill = FieldFill.UPDATE)
+    private Long updatedBy;
 
     /** 乐观锁版本号 */
     @Version

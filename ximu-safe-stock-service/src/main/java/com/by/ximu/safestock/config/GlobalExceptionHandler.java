@@ -3,6 +3,10 @@ package com.by.ximu.safestock.config;
 import com.by.ximu.common.ForbiddenException;
 import com.by.ximu.common.Result;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageConversionException;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -11,45 +15,79 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.stream.Collectors;
 
 /**
- * 全局异常处理：参数异常、校验异常、兜底异常统一转 {@link Result#error}。
+ * 全局异常处理：统一转 {@link Result}，并携带真实 HTTP 状态码（P2-1：原实现恒 200，
+ * WAF/监控/网关/前端拦截器全部按 2xx 处理，错误被吞）。
+ *
+ * <p>状态码映射：403 越权 / 400 参数与校验 / 409 状态机与并发冲突 / 500 兜底。
+ * 与 inventory-service 的同名类保持同构（两服务对同一前端，行为必须一致）。
+ *
+ * <p>消息泄露面控制（P2-2）：业务异常消息原样返回；框架层异常（JSON 转换、数据完整性冲突）
+ * 的 message 含 Java 类名/约束名，映射固定文案，明细只进日志。
  */
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    /** 越权操作 → 403 */
+    /** 越权操作 → HTTP 403 */
     @ExceptionHandler(ForbiddenException.class)
-    public Result<Void> handleForbidden(ForbiddenException e) {
+    public ResponseEntity<Result<Void>> handleForbidden(ForbiddenException e) {
         log.warn("越权操作: {}", e.getMessage());
-        return Result.error(403, e.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Result.error(403, e.getMessage()));
     }
 
+    /** 并发冲突（乐观锁更新失败等）→ HTTP 409（body code=1 业务失败，与 inventory 服务语义一致） */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Result<Void>> handleIllegalState(IllegalStateException e) {
+        log.warn("状态非法操作: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Result.error(1, e.getMessage()));
+    }
+
+    /** 非法参数（消息为业务 throw 点文案）→ HTTP 400 */
     @ExceptionHandler(IllegalArgumentException.class)
-    public Result<Void> handleIllegalArg(IllegalArgumentException e) {
+    public ResponseEntity<Result<Void>> handleIllegalArg(IllegalArgumentException e) {
         log.warn("参数异常: {}", e.getMessage());
-        return Result.error(400, e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Result.error(400, e.getMessage()));
     }
 
+    /** JSON 请求体解析/转换失败（Jackson 消息含类名与字段路径，属内部信息）→ HTTP 400 固定文案 */
+    @ExceptionHandler(HttpMessageConversionException.class)
+    public ResponseEntity<Result<Void>> handleUnreadable(HttpMessageConversionException e) {
+        log.warn("请求体解析失败: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Result.error(400, "请求体格式错误，请检查 JSON 结构与字段类型"));
+    }
+
+    /** 数据完整性冲突（唯一键/外键/CHECK，消息含约束名与 SQL 状态码）→ HTTP 400 固定文案 */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Result<Void>> handleDataIntegrity(DataIntegrityViolationException e) {
+        log.warn("数据完整性冲突: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Result.error(400, "数据完整性冲突（唯一键或约束校验失败），请检查提交内容是否重复或越界"));
+    }
+
+    /** @RequestBody Bean 校验异常 → HTTP 400（字段级提示，无内部信息） */
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public Result<Void> handleValid(MethodArgumentNotValidException e) {
+    public ResponseEntity<Result<Void>> handleValid(MethodArgumentNotValidException e) {
         String msg = e.getBindingResult().getFieldErrors().stream()
                 .map(f -> f.getField() + ": " + f.getDefaultMessage())
                 .collect(Collectors.joining("; "));
-        return Result.error(400, msg);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Result.error(400, msg));
     }
 
+    /** query string 参数绑定异常 → HTTP 400 */
     @ExceptionHandler(BindException.class)
-    public Result<Void> handleBind(BindException e) {
+    public ResponseEntity<Result<Void>> handleBind(BindException e) {
         String msg = e.getBindingResult().getFieldErrors().stream()
                 .map(f -> f.getField() + ": " + f.getDefaultMessage())
                 .collect(Collectors.joining("; "));
-        return Result.error(400, msg);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Result.error(400, msg));
     }
 
-    /** 兜底异常：detail 只进日志，不返前端，避免泄露内部信息 */
+    /** 兜底异常：detail 只进日志，不返前端，避免泄露内部信息 → HTTP 500 */
     @ExceptionHandler(Exception.class)
-    public Result<Void> handleException(Exception e) {
+    public ResponseEntity<Result<Void>> handleException(Exception e) {
         log.error("系统异常", e);
-        return Result.error(500, "服务器内部错误，请联系管理员");
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Result.error(500, "服务器内部错误，请联系管理员"));
     }
 }

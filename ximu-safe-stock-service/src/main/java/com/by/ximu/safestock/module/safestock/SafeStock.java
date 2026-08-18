@@ -1,6 +1,8 @@
 package com.by.ximu.safestock.module.safestock;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
@@ -49,11 +51,21 @@ public class SafeStock {
     /** 安全库存 */
     private BigDecimal safeStock;
 
+    /** 幂等键：同一操作人重复提交相同 requestId 时返回已有配置（复合唯一键 uk_safe_stock_request_id，V8） */
+    private String requestId;
+
+    /** 创建人（网关注入的操作员 ID，与 requestId 组成复合幂等键） */
+    private Long createdBy;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime createdAt;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime updatedAt;
+
+    /** 最后修改人ID（P2-5，MetaObjectHandler 从登录上下文自动填充） */
+    @TableField(fill = FieldFill.UPDATE)
+    private Long updatedBy;
 
     /** 乐观锁版本号 */
     @Version

@@ -1,6 +1,8 @@
 package com.by.ximu.gateway;
 
+import com.by.ximu.common.Role;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtParserBuilder;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,19 +15,31 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * JWT 校验全局过滤器：校验 Authorization 头 → 剥离客户端伪造的 X-User-* → 注入可信身份头。
  *
  * <p>下游服务从 X-User-Id / X-User-Name / X-User-Roles 读取身份，不再信任请求体 operator。
  * 白名单路径（skip-prefixes，默认 /actuator）跳过校验。
+ *
+ * <p>令牌声明收紧（P2-4）：
+ * <ul>
+ *   <li>roles 白名单：claim 值（列表或逗号串）逐个过 {@link Role} 枚举名白名单，未知/含逗号
+ *       的畸形值直接丢弃——角色数据源被污染（角色名里混入逗号）也不会在拼接/拆分中造出新角色；</li>
+ *   <li>iss/aud 校验：配置了 app.jwt.issuer / audience 时强制匹配（防其他系统签发的同密钥
+ *       token 混用），留空不校验（向后兼容存量签发方）。</li>
+ * </ul>
  */
 @Component
 public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
@@ -33,12 +47,24 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
     @Value("${app.jwt.secret}")
     private String secret;
 
+    /** 可选：签发方声明校验（配置非空即强制 requireIssuer） */
+    @Value("${app.jwt.issuer:}")
+    private String issuer;
+
+    /** 可选：受众声明校验（配置非空即强制 requireAudience） */
+    @Value("${app.jwt.audience:}")
+    private String audience;
+
     /** 内部共享令牌：网关校验 JWT 后注入，下游服务据此确认请求确经网关（防直连伪造 X-User-*） */
     @Value("${app.gateway-token:}")
     private String gatewayToken;
 
     @Value("${app.auth.skip-prefixes:/actuator}")
     private String skipPrefixes;
+
+    /** 合法角色白名单（与 ximu-common Role 枚举单一来源同步） */
+    private static final Set<String> KNOWN_ROLES =
+            Arrays.stream(Role.values()).map(Enum::name).collect(Collectors.toUnmodifiableSet());
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
@@ -56,8 +82,14 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
         String token = auth.substring(7);
         try {
             SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-            Claims claims = Jwts.parser().verifyWith(key).build()
-                    .parseSignedClaims(token).getPayload();
+            JwtParserBuilder parser = Jwts.parser().verifyWith(key);
+            if (StringUtils.hasText(issuer)) {
+                parser.requireIssuer(issuer);
+            }
+            if (StringUtils.hasText(audience)) {
+                parser.requireAudience(audience);
+            }
+            Claims claims = parser.build().parseSignedClaims(token).getPayload();
             // 严格过期校验：exp 必须存在且未过期，否则拒绝（防签发方漏设 exp 导致 token 永久有效）
             if (claims.getExpiration() == null || claims.getExpiration().before(new java.util.Date())) {
                 return unauthorized(exchange);
@@ -90,14 +122,23 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
         }
     }
 
+    /**
+     * roles claim 提取 + 白名单过滤（P2-4）。
+     *
+     * <p>claim 为列表时逐项过滤；为字符串时按逗号拆分再逐项过滤（与下游 OperatorContextFilter 的
+     * split(",") 语义对齐）。任何不在 {@link Role} 枚举内的值（含整体带逗号的串）一律丢弃，
+     * 杜绝「畸形角色值经拼接/拆分组合出 ADMIN」的注入面。
+     */
     private String extractRoles(Object rolesClaim) {
         if (rolesClaim == null) {
             return "";
         }
-        if (rolesClaim instanceof List<?> list) {
-            return list.stream().map(String::valueOf).collect(Collectors.joining(","));
-        }
-        return String.valueOf(rolesClaim);
+        Stream<String> values = rolesClaim instanceof List<?> list
+                ? list.stream().map(String::valueOf)
+                : Arrays.stream(String.valueOf(rolesClaim).split(","));
+        return values.map(String::trim)
+                .filter(KNOWN_ROLES::contains)
+                .collect(Collectors.joining(","));
     }
 
     private Mono<Void> unauthorized(ServerWebExchange exchange) {

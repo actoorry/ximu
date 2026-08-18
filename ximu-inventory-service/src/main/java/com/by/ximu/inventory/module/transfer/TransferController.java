@@ -61,8 +61,8 @@ public class TransferController {
         if (isTransition(body)) {
             String action = String.valueOf(body.get("action"));
             switch (action) {
-                case "approve" -> transferService.approve(id);
-                case "complete" -> transferService.complete(id);
+                case "approve" -> { requireStatusMatch(body, "approve", "APPROVED"); transferService.approve(id); }
+                case "complete" -> { requireStatusMatch(body, "complete", "COMPLETED"); transferService.complete(id); }
                 default -> throw new IllegalArgumentException("不支持的流转动作: " + action);
             }
             return Result.ok();
@@ -75,6 +75,13 @@ public class TransferController {
     public Result<Void> delete(@PathVariable Long id) {
         transferService.deleteWithItems(id);
         return Result.ok();
+    }
+
+    /** 流转请求携带 status 时必须与 action 目标状态一致，否则 400（P2-16：不再静默忽略，防前端误以为已生效） */
+    private static void requireStatusMatch(Map<String, Object> body, String action, String targetStatus) {
+        if (body.containsKey("status") && !targetStatus.equals(body.get("status"))) {
+            throw new IllegalArgumentException("status 与 action 不一致：action=" + action + " 的目标状态为 " + targetStatus);
+        }
     }
 
     private boolean isTransition(Map<String, Object> body) {

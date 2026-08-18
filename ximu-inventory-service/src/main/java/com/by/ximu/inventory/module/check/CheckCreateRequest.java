@@ -2,6 +2,7 @@ package com.by.ximu.inventory.module.check;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -27,6 +28,7 @@ public class CheckCreateRequest {
 
     /** 明细列表（推荐传多行商品） */
     @Valid
+    @Size(max = 200, message = "明细行数不能超过 200")
     private List<CheckItem> items;
 
     // ===== 兼容旧版单品字段（旧盘点头仅有 actualQty，productName/spec 可选补传） =====

@@ -18,7 +18,7 @@ spring:
   application:
     name: ximu-inventory-service
   datasource:
-    url: "${DB_URL:jdbc:mysql://localhost:3306/ximu?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8}"
+    url: "${DB_URL:jdbc:mysql://localhost:3306/ximu?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8&connectionCollation=utf8mb4_0900_ai_ci}"
     username: "${DB_USERNAME:root}"
     password: "${DB_PASSWORD:123456}"
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -34,8 +34,11 @@ spring:
       mode: never
       encoding: UTF-8
   flyway:
-    # Flyway 迁移（inventory-service 独占库 ximu 的 DDL 迁移权）
-    # 存量库首次启动：baseline-on-migrate=true 先打 baseline 1 并跳过 V1；新库直接执行 V1 建全表+种子。
+    # Flyway 是 ximu 库的唯一初始化路径（P0-4 收敛，data/ximu_init.sql 已废弃）：
+    #   - 空库：启动即执行 V1~V6+ 全量迁移（V6 起已清理迁移夹带的演示种子）；
+    #   - 存量库：baseline-on-migrate 打 baseline 1 跳过 V1，从 V2 起增量执行
+    #     （存量库跑 V4 前先人工执行 db/precheck/pre_v4_negative_stock_report.sql 核对归零清单）；
+    #   - 演示数据：迁移完成后手工执行 db/demo/demo_seed.sql（Flyway 不加载该目录）。
     # dev 若仍想用 spring.sql.init 建表，可设 FLYWAY_ENABLED=false（二者别同时开，避免重复建表）。
     enabled: ${FLYWAY_ENABLED:true}
     baseline-on-migrate: true
@@ -46,12 +49,16 @@ spring:
 app:
   cors:
     allowed-origins: "${CORS_ORIGINS:http://localhost:5173,http://localhost:3000}"
-  # 内部共享令牌：与网关 GATEWAY_TOKEN 一致时，下游校验请求确经网关（防直连伪造身份）。
-  # 本地开发留空则不校验（方便直连调试）；生产必须经 application-prod.yml 强制注入。
-  gateway-token: "${GATEWAY_TOKEN:}"
+  # 内部共享令牌：与网关 GATEWAY_TOKEN 一致，校验请求确经网关（防直连伪造身份）。
+  # 无兜底值（P0-2）：缺 GATEWAY_TOKEN 启动即失败；dev profile 兜底 dev-shared-gateway-token；
+  # 需临时直连调试（curl 不带 X-Gateway-Token）可用环境变量 GATEWAY_TOKEN= 空串关闭校验。
+  gateway-token: "${GATEWAY_TOKEN}"
   auth:
     # 生产保持 true（要求网关注入身份头）；仅本地开发可临时 false
     enabled: true
+    # 公开路径白名单（P0-5，前缀匹配）：白名单外且非 /api/ 前缀的路径一律 404；
+    # 默认/生产不含 swagger（收敛暴露面，见 P2-3），本地开发经 application-dev.yml 追加。
+    public-paths: "/actuator/health,/actuator/info"
 
 mybatis-plus:
   configuration:

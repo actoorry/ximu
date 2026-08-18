@@ -1,5 +1,6 @@
 package com.by.ximu.inventory.module.stock;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.by.ximu.common.Auths;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.Role;
@@ -8,6 +9,7 @@ import com.by.ximu.common.Result;
 import com.by.ximu.inventory.module.log.OperationLogService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -51,6 +53,7 @@ public class InventoryStockController {
         return Result.ok(stock);
     }
 
+    @Transactional
     @PostMapping
     public Result<InventoryStock> create(@Valid @RequestBody InventoryStockCreateRequest req) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
@@ -65,10 +68,11 @@ public class InventoryStockController {
         entity.setStockAge(req.getStockAge());
         entity.setAgeWarnDays(req.getAgeWarnDays());
         inventoryStockService.save(entity);
-        operationLogService.record("stock", "CREATE", entity.getId(), entity.getProductName(), OperatorContext.getOperatorName(), req);
+        operationLogService.recordInTx("stock", "CREATE", entity.getId(), entity.getProductName(), OperatorContext.getOperatorName(), req);
         return Result.ok(entity);
     }
 
+    @Transactional
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody InventoryStock entity) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
@@ -88,10 +92,11 @@ public class InventoryStockController {
         if (!inventoryStockService.updateById(existed)) {
             throw new IllegalStateException("库存并发冲突，请刷新后重试");
         }
-        operationLogService.record("stock", "UPDATE", id, existed.getProductName(), OperatorContext.getOperatorName(), entity);
+        operationLogService.recordInTx("stock", "UPDATE", id, existed.getProductName(), OperatorContext.getOperatorName(), entity);
         return Result.ok();
     }
 
+    @Transactional
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
@@ -104,8 +109,16 @@ public class InventoryStockController {
                 || (existed.getTransitQty() != null && existed.getTransitQty().compareTo(java.math.BigDecimal.ZERO) != 0)) {
             throw new IllegalStateException("库存不为零，不可删除（请通过出库/调拨流转处理）");
         }
-        inventoryStockService.removeById(id);
-        operationLogService.record("stock", "DELETE", id, existed.getProductName(), OperatorContext.getOperatorName(), null);
+        // 条件删除（P0-3）：数量为 0 的约束随删除语句原子下发，
+        // 堵住「读到 0 → 并发单据联动改数量 → 仍删除」的竞态窗口（V4 后两列 NOT NULL，eq 0 无 NULL 陷阱）
+        boolean removed = inventoryStockService.remove(new LambdaQueryWrapper<InventoryStock>()
+                .eq(InventoryStock::getId, id)
+                .eq(InventoryStock::getActualQty, java.math.BigDecimal.ZERO)
+                .eq(InventoryStock::getTransitQty, java.math.BigDecimal.ZERO));
+        if (!removed) {
+            throw new IllegalStateException("库存不为零或并发冲突，不可删除（请通过出库/调拨流转处理）");
+        }
+        operationLogService.recordInTx("stock", "DELETE", id, existed.getProductName(), OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 

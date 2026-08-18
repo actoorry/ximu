@@ -9,12 +9,16 @@ import com.by.ximu.inventory.module.log.OperationLogService;
 import jakarta.validation.Valid;
 import org.springframework.dao.DuplicateKeyException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
 /**
  * 批号 Controller。
+ *
+ * <p>写操作与审计日志同事务（P2-7：{@code recordInTx}，审计失败即回滚业务写，
+ * 基础数据变更不再出现"改了数据、丢审计"的静默不一致）。
  */
 @RestController
 @RequestMapping("/api/inventory/batch")
@@ -38,6 +42,7 @@ public class BatchController {
         return Result.ok(batchService.getById(id));
     }
 
+    @Transactional
     @PostMapping
     public Result<Batch> create(@Valid @RequestBody BatchCreateRequest req) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
@@ -49,10 +54,11 @@ public class BatchController {
         entity.setCreator(req.getCreator());
         entity.setRemark(req.getRemark());
         batchService.save(entity);
-        operationLogService.record("batch", "CREATE", entity.getId(), entity.getBatchNo(), OperatorContext.getOperatorName(), req);
+        operationLogService.recordInTx("batch", "CREATE", entity.getId(), entity.getBatchNo(), OperatorContext.getOperatorName(), req);
         return Result.ok(entity);
     }
 
+    @Transactional
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Batch entity) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
@@ -73,10 +79,11 @@ public class BatchController {
         } catch (DuplicateKeyException e) {
             throw new IllegalArgumentException("批号已存在: " + entity.getBatchNo());
         }
-        operationLogService.record("batch", "UPDATE", id, existed.getBatchNo(), OperatorContext.getOperatorName(), entity);
+        operationLogService.recordInTx("batch", "UPDATE", id, existed.getBatchNo(), OperatorContext.getOperatorName(), entity);
         return Result.ok();
     }
 
+    @Transactional
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
@@ -85,7 +92,7 @@ public class BatchController {
             throw new IllegalArgumentException("批号不存在: " + id);
         }
         batchService.removeById(id);
-        operationLogService.record("batch", "DELETE", id, existed.getBatchNo(), OperatorContext.getOperatorName(), null);
+        operationLogService.recordInTx("batch", "DELETE", id, existed.getBatchNo(), OperatorContext.getOperatorName(), null);
         return Result.ok();
     }
 }
