@@ -15,8 +15,9 @@ ximu（进销存管理系统）库存模块：入库/出库/盘点/调拨/安全
 | 组件 | 版型 |
 |------|------|
 | JDK | 17（`C:\Users\Administrator\.jdks\ms-17.0.20`） |
-| Spring Boot | 3.2.5（兼容 JDK17） |
-| MyBatis-Plus | 3.5.9（`mybatis-plus-spring-boot3-starter` + `mybatis-plus-jsqlparser`） |
+| Spring Boot | 3.5.16 + Spring Cloud 2025.0.1（2026-08 P1-6 升级，兼容 JDK17；4.x 迁移另立项） |
+| MyBatis-Plus | 3.5.12（`mybatis-plus-spring-boot3-starter` + `mybatis-plus-jsqlparser`） |
+| springdoc | 2.8.17（OpenAPI 文档，与 Boot 3.5.x 匹配） |
 | 数据库 | MySQL 8（容器 mysql8，`localhost:3306`，root/123456，库 `ximu`） |
 | 构建工具 | Maven（`D:\IDEA\IntelliJ IDEA 2025.1\plugins\maven\lib\maven3`） |
 
@@ -45,7 +46,7 @@ $env:Path = "$env:JAVA_HOME\bin;$env:MAVEN_HOME\bin;$env:Path"
 
 ## 生产部署须知
 
-- **数据库凭据**：账号密码通过环境变量注入 `DB_USERNAME` / `DB_PASSWORD`，本地开发默认 `root` / `123456`（见各 `application.yml` 的 `${DB_USERNAME:root}` / `${DB_PASSWORD:123456}`）。生产严禁使用默认值，务必设置环境变量。
+- **数据库凭据**：账号密码通过环境变量注入 `DB_USERNAME` / `DB_PASSWORD`，本地开发默认 `root` / `123456`（见各 `application.yml` 的 `${DB_USERNAME:root}` / `${DB_PASSWORD:123456}`）。生产严禁使用默认值，务必设置环境变量；且按服务拆分账号最小授权（`ximu_inventory` 全表+迁移权 / `ximu_safestock` 仅两张表 DML，模板见 `db/grants/service_accounts.sql`）。
 - **CORS**：允许的前端来源通过 `app.cors.allowed-origins`（逗号分隔）配置，默认仅 `localhost:5173/3000`；生产按实际域名收紧，不要回退为 `*`。
 - **认证**：本模块不内置 Spring Security，认证与鉴权由上游网关 / 父应用统一处理后再路由到本服务。
 - **DDL 管理**：`spring.sql.init.mode` 生产保持 `never`，schema 变更走 Flyway/Liquibase 或人工 DBA 流程。

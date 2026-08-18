@@ -39,8 +39,9 @@ ximu 是一个进销存管理系统，聚焦库存域的业务闭环。系统围
 | 端 | 技术 |
 |----|------|
 | 语言 / 运行时 | Java 17 |
-| 框架 | Spring Boot 3.2.5 |
-| 数据访问 | MyBatis-Plus 3.5.9 |
+| 框架 | Spring Boot 3.5.16 + Spring Cloud 2025.0.1 |
+| 数据访问 | MyBatis-Plus 3.5.12 |
+| API 文档 | springdoc-openapi 2.8.17 |
 | 数据库 | MySQL 8 |
 | 构建工具 | Maven |
 | 辅助 | Lombok、Spring Validation、Spring AOP、Spring Boot Actuator |
@@ -49,7 +50,7 @@ ximu 是一个进销存管理系统，聚焦库存域的业务闭环。系统围
 
 环境要求：JDK 17、Maven 3.9+、MySQL 8。
 
-1. 初始化数据库：执行各服务 `src/main/resources/schema.sql` 建表并写入种子数据。
+1. 初始化数据库：**Flyway 是唯一初始化路径**——空库（`CREATE DATABASE ximu`）直接启动 inventory-service 即自动执行 V1~V6+ 全量迁移；存量旧库首次启动自动打 baseline 跳过 V1、从 V2 起增量迁移（跑 V4 前先人工执行 `db/precheck/pre_v4_negative_stock_report.sql` 核对负值/NULL 归零清单）。需要演示数据时，迁移完成后手工执行 `ximu-inventory-service/src/main/resources/db/demo/demo_seed.sql`。
 2. 配置数据库连接：通过环境变量 `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` 注入连接串与账号密码（本地开发默认连接 `localhost:3306/ximu`、账号 `root` / `123456`），或直接修改各服务的 `application.yml`。
 3. 构建：
 
@@ -57,14 +58,15 @@ ximu 是一个进销存管理系统，聚焦库存域的业务闭环。系统围
 mvn clean package -DskipTests
 ```
 
-4. 启动两个服务：
+4. 启动服务（本地开发显式激活 dev profile，提供开发兜底密钥；缺 profile 且无环境变量时启动失败）：
 
 ```bash
-java -jar ximu-inventory-service/target/ximu-inventory-service-1.0-SNAPSHOT.jar
-java -jar ximu-safe-stock-service/target/ximu-safe-stock-service-1.0-SNAPSHOT.jar
+java -jar ximu-gateway/target/ximu-gateway-1.0-SNAPSHOT.jar --spring.profiles.active=dev
+java -jar ximu-inventory-service/target/ximu-inventory-service-1.0-SNAPSHOT.jar --spring.profiles.active=dev
+java -jar ximu-safe-stock-service/target/ximu-safe-stock-service-1.0-SNAPSHOT.jar --spring.profiles.active=dev
 ```
 
-5. 访问接口：
+5. 访问接口（经网关 `http://localhost:8080`；直连 8081/8082 需带 `-H "X-Gateway-Token: dev-shared-gateway-token"` 与 `X-User-Id` 身份头）：
 
 - 库存操作服务：`http://localhost:8081/api/inventory/{inbound|outbound|check|transfer|stock|batch|log}`
 - 安全库存服务：`http://localhost:8082/api/safe-stock`
@@ -81,13 +83,17 @@ java -jar ximu-safe-stock-service/target/ximu-safe-stock-service-1.0-SNAPSHOT.ja
 | 环境变量 | 含义 | 示例 | 必须性 |
 |----------|------|------|--------|
 | DB_URL | MySQL 连接串（含库名、字符集、时区） | jdbc:mysql://db.internal:3306/ximu?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8 | 生产必须（prod 无默认值） |
-| DB_USERNAME | 数据库账号 | ximu_app | 生产必须（prod 无默认值） |
+| DB_USERNAME | 数据库账号 | ximu_inventory | 生产必须（prod 无默认值） |
 | DB_PASSWORD | 数据库密码 | （强随机密码） | 生产必须（prod 无默认值） |
 | JWT_SECRET | JWT 签名密钥（仅网关使用） | （>=32 字节随机串） | 生产必须（网关默认值仅本地开发兜底） |
+| JWT_ISSUER | JWT 签发方声明（可选，配置即强制校验 iss） | ximu-auth | 可选（生产建议配置，防跨系统 token 混用） |
+| JWT_AUDIENCE | JWT 受众声明（可选，配置即强制校验 aud） | ximu-services | 可选（生产建议配置） |
 | GATEWAY_TOKEN | 网关与下游服务的内部共享令牌（防直连伪造身份） | （随机串，网关与两业务服务一致） | 生产必须（prod 无默认值） |
 | CORS_ORIGINS | 允许的前端来源，逗号分隔多个域名 | https://erp.example.com,https://admin.example.com | 生产必须（prod 无默认值） |
 
 > 说明：`JWT_SECRET` 必须是 >=32 字节随机串（HS256 密钥），可用 `openssl rand -base64 48` 生成。`GATEWAY_TOKEN` 是网关与两业务服务共享的内部令牌，网关校验 JWT 后注入 `X-Gateway-Token` 头，下游据此确认请求确经网关。生产激活 `application-prod.yml` 后，`DB_URL` / `DB_USERNAME` / `DB_PASSWORD` / `CORS_ORIGINS` / `JWT_SECRET` / `GATEWAY_TOKEN` 均无默认值，缺失即启动失败。
+>
+> **数据库账号最小授权（P2-8）**：生产禁止两服务共用同一账号——按服务拆分 `ximu_inventory`（全表 DML + Flyway 迁移 DDL 权限）与 `ximu_safestock`（仅 `inventory_safe_stock` DML + `operation_log` 写入，无任何 DDL），建账号 DDL 模板见 `ximu-inventory-service/src/main/resources/db/grants/service_accounts.sql`，各服务通过自己的 `DB_USERNAME` / `DB_PASSWORD` 注入对应账号。
 
 ### 启动顺序
 

@@ -244,3 +244,17 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
   3. 日志接入集中采集与告警（部署层配置）
   4. 三端 GATEWAY_TOKEN / JWT_SECRET 环境变量一致（部署责任，代码无法自动验证）
   5. dev 库已用 data/ximu_init.sql 重建为最新 schema（2026-08-17），无需再 ALTER
+
+### 外部审计 P0/P1/P2 修复验收（✅ 2026-08-18，组长执行）
+
+依据 `错误清单.md`（2026-08-18 外部四轮审计：并发/安全/事务/幂等/审计/部署/性能七维）+ `修复方案.md`。**P0×5 / P1×7 / P2×15 全部修复并验收通过，P2-6 待产品确认。**
+
+- **编译**：`mvn clean compile -DskipTests` ✅（Boot 3.5.16 + Cloud 2025.0.1 + MP 3.5.12 + springdoc 2.8.17 全家桶，P1-6 升级）
+- **全量单测**：`mvn clean test` ✅ **108 例全绿**（common 45：Auths 17/DimsNormalizer 11/OperatorContext 17；inventory 63：Filter 3/Check 2/Inbound 8/Outbound 1/StockAge 5/StockOp 29/StockWarn 7/Transfer 2/DocNo 6）
+- **测试设施兼容（P1-6 升级引发）**：① Mockito 5.17 inline mockmaker 对 MP 3.5.12 新继承树 retransform 失败 → `src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker` 写全限定类名切回 subclass；② 不再注入 ServiceImpl 继承字段 baseMapper → `@BeforeEach` 反射注入；③ MP 3.5.12 条件参数延迟求值 + 无 MyBatis 启动无 lambda cache → `@BeforeAll` 手动 initTableInfo + 断言前渲染 SQL segment
+- **空库全量演练**（ximu_drill_empty）：V1→V9 全链通过，pre_v7/pre_v8 零违规；13 表 + V6 种子清零 + 明细 CHECK×5 + 索引（status,created_at）×4 + oplog 组合索引 + safe_stock 三维键/幂等复合键 + 四头表 (request_id,created_by) 复合唯一键 全部就位
+- **存量库增量演练**（ximu_drill_legacy + ximu_drill_null）：构造负值/NULL 明细、NULL 维度、被流转改动的演示库存行 → pre_v7/pre_v8 精准拦截、人工修正后 V6→V9 放行；V6 防误删（污染行保留/干净种子删）、V7 回填语义（qty→0、settle_qty 保留 NULL）验证；行为级约束 7 项（NULL/负值拒、零值放行、三维重复拒、同人同 requestId 拒、**跨人同 requestId 放行**）
+- **V9**：8 表 updated_by + operation_log.operator_id + driver_phone VARCHAR(32) 落地；历史行 NULL 保留（不可追溯不伪造）
+- **P2-6 待产品确认**：调拨联动 / transit_qty / stock_age 去留三问，组长技术推荐方案已附 `修复方案.md` 4.2（推荐：移库不联动 + transit_qty/stock_age V10 删列）
+- **演练库保留备查**：ximu_drill_empty / ximu_drill_legacy / ximu_drill_null 未删，处置权归组长
+- **生产主库**：ximu 现处 V8，V9 应用属上线部署动作（待组长/DBA 执行）
