@@ -257,4 +257,4 @@ P0-2/3/1、P1-9（已完成）→ P0-4 审计进事务（+P1-7 一并重构）
 - **V9**：8 表 updated_by + operation_log.operator_id + driver_phone VARCHAR(32) 落地；历史行 NULL 保留（不可追溯不伪造）
 - **P2-6 待产品确认**：调拨联动 / transit_qty / stock_age 去留三问，组长技术推荐方案已附 `修复方案.md` 4.2（推荐：移库不联动 + transit_qty/stock_age V10 删列）
 - **演练库保留备查**：ximu_drill_empty / ximu_drill_legacy / ximu_drill_null 未删，处置权归组长
-- **生产主库**：ximu 现处 V8，V9 应用属上线部署动作（待组长/DBA 执行）
+- **生产主库**：ximu 实为 data/ximu_init.sql 重建的 **V5 结构、无 Flyway 基线**（2026-08-18 查库纠正，非此前所述 V8）；inventory `baseline-version` 已调 5，重启服务即自动 V6~V9 增量（属部署动作待组长/DBA 执行）

@@ -35,14 +35,16 @@ spring:
       encoding: UTF-8
   flyway:
     # Flyway 是 ximu 库的唯一初始化路径（P0-4 收敛，data/ximu_init.sql 已废弃）：
-    #   - 空库：启动即执行 V1~V6+ 全量迁移（V6 起已清理迁移夹带的演示种子）；
-    #   - 存量库：baseline-on-migrate 打 baseline 1 跳过 V1，从 V2 起增量执行
-    #     （存量库跑 V4 前先人工执行 db/precheck/pre_v4_negative_stock_report.sql 核对归零清单）；
+    #   - 空库：启动即执行 V1~V9 全量迁移（V6 起已清理迁移夹带的演示种子）；
+    #   - 存量库：baseline-on-migrate 打 baseline 5（当前主库为 data/ximu_init.sql 重建的 V5 结构、
+    #     无 history 表），从 V6 起增量执行；V7/V8 前先人工跑 db/precheck/pre_v7_item_qty_report.sql
+    #     与 pre_v8_safe_stock_null_report.sql 核对（V7 存量 NULL/负值、V8 safe_stock 维度 NULL）。
+    #     注意：baseline-version 假设存量结构恰为 V1~V5 与迁移链完整对应，勿调低跳过未应用变更。
     #   - 演示数据：迁移完成后手工执行 db/demo/demo_seed.sql（Flyway 不加载该目录）。
     # dev 若仍想用 spring.sql.init 建表，可设 FLYWAY_ENABLED=false（二者别同时开，避免重复建表）。
     enabled: ${FLYWAY_ENABLED:true}
     baseline-on-migrate: true
-    baseline-version: 1
+    baseline-version: 5
     locations: classpath:db/migration
 
 # 跨域允许的前端来源（逗号分隔），统一走 CORS_ORIGINS 环境变量；生产按真实域名收紧，不要回退为 *
