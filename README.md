@@ -4,7 +4,7 @@
 
 ## 架构定位
 
-ximu 定位为**模块化、可插拔的开源进销存系统**：四个 Maven 模块（公共基座 / 网关 / 库存账本服务 / 安全库存服务）独立部署、独立启停伸缩，不嵌入任何父应用，也不绑定特定认证方案或前端。认证在网关边缘统一处理，业务服务只信任网关注入的 `X-User-*` 身份头；库存账本由 inventory-service 独占 Flyway 迁移权，安全库存服务可选装、可整体下线。
+ximu 定位为**模块化、可插拔的开源进销存系统**：五个 Maven 模块（公共基座 / 公共 Web 基座 / 网关 / 库存账本服务 / 安全库存服务）独立部署、独立启停伸缩，不嵌入任何父应用，也不绑定特定认证方案或前端。认证在网关边缘统一处理，业务服务只信任网关注入的 `X-User-*` 身份头；库存账本由 inventory-service 独占 Flyway 迁移权，安全库存服务可选装、可整体下线。
 
 > 详细模块地图、可插拔点清单、部署形态与扩展指南见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
@@ -50,9 +50,9 @@ ximu 是一个进销存管理系统，聚焦库存域的业务闭环。系统围
 
 环境要求：JDK 17、Maven 3.9+、MySQL 8。
 
-1. 初始化数据库：**Flyway 是唯一初始化路径**——空库（`CREATE DATABASE ximu`）直接启动 inventory-service 即自动执行 V1~V6+ 全量迁移；存量旧库首次启动自动打 baseline 跳过 V1、从 V2 起增量迁移（跑 V4 前先人工执行 `db/precheck/pre_v4_negative_stock_report.sql` 核对负值/NULL 归零清单）。需要演示数据时，迁移完成后手工执行 `ximu-inventory-service/src/main/resources/db/demo/demo_seed.sql`。
+1. 初始化数据库：**Flyway 是唯一初始化路径**——空库（`CREATE DATABASE ximu`）直接启动 inventory-service 即自动执行 V1~V10 全量迁移；存量旧库（当前主库为 V5 结构、无 Flyway 基线，2026-08-18 主库评估核实）首次启动自动打 baseline 5、从 V6 起增量迁移（V7/V8 前先人工执行 `ximu-inventory-service/src/main/resources/db/precheck/pre_v7_item_qty_report.sql` 与 `pre_v8_safe_stock_null_report.sql` 核对存量明细负值与 safe_stock 维度 NULL）。需要演示数据时，迁移完成后手工执行 `ximu-inventory-service/src/main/resources/db/demo/demo_seed.sql`。
 2. 配置数据库连接：通过环境变量 `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` 注入连接串与账号密码（本地开发默认连接 `localhost:3306/ximu`、账号 `root` / `123456`），或直接修改各服务的 `application.yml`。
-3. 构建：
+3. 构建（打包可执行 jar 供步骤 4 启动；仅编译验证用 `mvn clean compile -DskipTests`，全量测试验收用 `mvn clean test`）：
 
 ```bash
 mvn clean package -DskipTests
@@ -91,6 +91,8 @@ java -jar ximu-safe-stock-service/target/ximu-safe-stock-service-1.0-SNAPSHOT.ja
 | GATEWAY_TOKEN | 网关与下游服务的内部共享令牌（防直连伪造身份） | （随机串，网关与两业务服务一致） | 生产必须（prod 无默认值） |
 | CORS_ORIGINS | 允许的前端来源，逗号分隔多个域名 | https://erp.example.com,https://admin.example.com | 生产必须（prod 无默认值） |
 
+> **CORS（R2-P2-7 风险接受）**：前端来源由网关 `globalcors` 统一放行（`CORS_ORIGINS`）；两业务服务自身的 `app.cors.allowed-origins` 默认也开放 `localhost:5173/3000`，与「仅网关对外」的定位并存——已知风险接受。生产如确认只经网关对外，可将下游该配置留空（不配置）关闭服务自身 CORS，收敛攻击面。
+>
 > 说明：`JWT_SECRET` 必须是 >=32 字节随机串（HS256 密钥），可用 `openssl rand -base64 48` 生成。`GATEWAY_TOKEN` 是网关与两业务服务共享的内部令牌，网关校验 JWT 后注入 `X-Gateway-Token` 头，下游据此确认请求确经网关。生产激活 `application-prod.yml` 后，`DB_URL` / `DB_USERNAME` / `DB_PASSWORD` / `CORS_ORIGINS` / `JWT_SECRET` / `GATEWAY_TOKEN` 均无默认值，缺失即启动失败。
 >
 > **数据库账号最小授权（P2-8）**：生产禁止两服务共用同一账号——按服务拆分 `ximu_inventory`（全表 DML + Flyway 迁移 DDL 权限）与 `ximu_safestock`（仅 `inventory_safe_stock` DML + `operation_log` 写入，无任何 DDL），建账号 DDL 模板见 `ximu-inventory-service/src/main/resources/db/grants/service_accounts.sql`，各服务通过自己的 `DB_USERNAME` / `DB_PASSWORD` 注入对应账号。
@@ -134,7 +136,7 @@ java -jar ximu-gateway/target/ximu-gateway-1.0-SNAPSHOT.jar
 两个业务服务只信任网关注入的身份头 X-User-Id / X-User-Name / X-User-Roles，自身不内置认证，因此生产必须：
 
 - 将 8081 / 8082 两个业务服务网络隔离在网关之后（防火墙 / 安全组只放行 8080，不对外暴露 8081 / 8082）。
-- 设置 `GATEWAY_TOKEN`（网关注入 X-Gateway-Token 头、下游校验），作为网络隔离之外的代码层兜底：直连伪造 X-User-* 但无正确网关令牌的请求会被 401 拒绝。
+- 设置 `GATEWAY_TOKEN`（网关注入 X-Gateway-Token 头、下游校验），作为网络隔离之外的代码层兜底：直连伪造 X-User-* 但无正确网关令牌的请求会被 401 拒绝；两业务服务 `auth.enabled=true` 时缺失 `GATEWAY_TOKEN` 直接拒绝启动（R2-P1-4 fail-closed，无「空串关闭校验」逃生门）。
 - 严禁客户端绕过网关直连业务服务，否则攻击者可伪造 X-User-* 头冒充任意用户，认证形同虚设。
 - 保持各服务 `app.auth.enabled: true`（默认即如此），仅本地开发可临时关闭。
 
@@ -150,6 +152,7 @@ java -jar ximu-gateway/target/ximu-gateway-1.0-SNAPSHOT.jar
 ```
 ximu
 ├── ximu-common                公共模块（统一返回结构、分页基类）
+├── ximu-common-web            公共 Web 基座（审计/全局异常/CORS/RBAC 注解，随业务服务打包）
 ├── ximu-inventory-service     库存操作微服务（端口 8081）
 ├── ximu-safe-stock-service    安全库存微服务（端口 8082）
 ├── ximu-gateway               统一网关（端口 8080，JWT 校验 + 身份头注入）
