@@ -19,21 +19,29 @@ public class OutboundCreateRequest {
 
     /** 单号（可选，不传则后端自动生成） */
     /** 客户端幂等键（防双击/重试重复建单，可选） */
+    @Size(max = 64, message = "requestId 长度不能超过 64")
     private String requestId;
 
+    @Size(max = 64, message = "单号长度不能超过 64")
     private String outboundNo;
 
+    @Size(max = 64, message = "销售单号长度不能超过 64")
     private String saleOrderNo;
 
     /** 博宇承担 / 对方承担 */
+    @Size(max = 20, message = "运费承担方长度不能超过 20")
     private String freightBearer;
 
+    @Size(max = 64, message = "承运商长度不能超过 64")
     private String carrier;
 
+    @Size(max = 7, message = "车牌号长度不能超过 7")
     private String plateNo;
 
+    @Size(max = 5, message = "司机姓名长度不能超过 5")
     private String driver;
 
+    @Size(max = 32, message = "司机电话长度不能超过 32")
     private String driverPhone;
 
     /** 明细列表（推荐传多行商品） */

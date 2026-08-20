@@ -22,18 +22,24 @@ public class InboundCreateRequest {
 
     /** 单号（可选，不传则后端自动生成） */
     /** 客户端幂等键（防双击/重试重复建单，可选） */
+    @Size(max = 64, message = "requestId 长度不能超过 64")
     private String requestId;
 
+    @Size(max = 64, message = "单号长度不能超过 64")
     private String inboundNo;
 
     /** 估价 / 代销 / 内部 */
+    @Size(max = 20, message = "入库类型长度不能超过 20")
     private String inboundType;
 
+    @Size(max = 64, message = "来源单号长度不能超过 64")
     private String sourceOrderNo;
 
+    @Size(max = 64, message = "验收人长度不能超过 64")
     private String checker;
 
     /** 直接审核 / 总监审核 / 经理审核 */
+    @Size(max = 20, message = "审核级别长度不能超过 20")
     private String auditLevel;
 
     /** 明细列表（推荐传多行商品） */

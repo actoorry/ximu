@@ -43,4 +43,8 @@ spring:
 app:
   jwt:
     secret: "${JWT_SECRET}"
+    # R2-P2-3：issuer/audience 建议按外部签发方契约填写（配置非空即 requireIssuer/requireAudience
+    # 强制校验，防同密钥 token 跨系统混用）。留空即不校验——风险接受，仅推荐「单签发方 + 密钥独享」时留空。
+    issuer: "${JWT_ISSUER:}"
+    audience: "${JWT_AUDIENCE:}"
   gateway-token: "${GATEWAY_TOKEN}"

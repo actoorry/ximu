@@ -11,14 +11,16 @@
 -- ============================================================================
 
 -- 1. 将被 V4 归零的负值行（actual_qty / transit_qty < 0）
-SELECT id, org_id, product_name, material, spec, grade,
+--    R2-P1-6：V4 时代 inventory_stock 尚无 material 列（V5 才加五维），
+--    此处不 SELECT material，否则在 V4 前核对时脚本因 Unknown column 报错
+SELECT id, org_id, product_name, spec, grade,
        actual_qty, transit_qty, version, created_at, updated_at,
        '负值 → 将被归零为 0' AS action
 FROM inventory_stock
 WHERE actual_qty < 0 OR transit_qty < 0;
 
 -- 2. 将被 V4 回填的 NULL 行
-SELECT id, org_id, product_name, material, spec, grade,
+SELECT id, org_id, product_name, spec, grade,
        actual_qty, transit_qty, version, created_at, updated_at,
        'NULL → 将被回填为 0' AS action
 FROM inventory_stock

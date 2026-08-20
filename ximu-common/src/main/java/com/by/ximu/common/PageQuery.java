@@ -1,6 +1,7 @@
 package com.by.ximu.common;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.Data;
 
 import java.util.HashMap;
@@ -22,6 +23,18 @@ public class PageQuery {
 
     /** 模糊搜索关键字 */
     private String keyword;
+
+    /**
+     * 构造 MyBatis-Plus 分页对象：页码从 1 起、size 默认 10 上限 200。
+     *
+     * <p>各 Service 私有 buildPage 的归一逻辑统一上收（原全库 8 处重复）。
+     */
+    public <T> Page<T> buildPage() {
+        int p = page == null || page < 1 ? 1 : page;
+        int s = size == null || size < 1 ? 10 : size;
+        s = Math.min(s, 200);
+        return new Page<>(p, s);
+    }
 
     /**
      * 将 MyBatis-Plus 分页结果转换为前端契约结构。

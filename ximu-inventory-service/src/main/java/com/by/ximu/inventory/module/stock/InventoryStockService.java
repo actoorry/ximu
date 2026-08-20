@@ -1,7 +1,6 @@
 package com.by.ximu.inventory.module.stock;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.by.ximu.common.PageQuery;
 import org.springframework.stereotype.Service;
@@ -24,19 +23,14 @@ public class InventoryStockService extends ServiceImpl<InventoryStockMapper, Inv
             wrapper.like(InventoryStock::getGrade, grade);
         }
         if (StringUtils.hasText(query.getKeyword())) {
+            // R2-P2-26：keyword 走 LIKE '%kw%'（前导通配）无法命中 V7 的 status/created_at 索引，
+            // 数据量大时全表扫——当前单量级可接受；若成瓶颈改前缀索引/全文检索或对账侧拉数据
             String kw = query.getKeyword();
             wrapper.and(w -> w.like(InventoryStock::getProductName, kw)
                     .or().like(InventoryStock::getSpec, kw)
                     .or().like(InventoryStock::getGrade, kw));
         }
         wrapper.orderByDesc(InventoryStock::getCreatedAt);
-        return query.toPageMap(baseMapper.selectPage(buildPage(query), wrapper));
-    }
-
-    private Page<InventoryStock> buildPage(PageQuery query) {
-        int p = query.getPage() == null || query.getPage() < 1 ? 1 : query.getPage();
-        int s = query.getSize() == null || query.getSize() < 1 ? 10 : query.getSize();
-        s = Math.min(s, 200);
-        return new Page<>(p, s);
+        return query.toPageMap(baseMapper.selectPage(query.buildPage(), wrapper));
     }
 }

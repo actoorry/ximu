@@ -36,14 +36,21 @@ spring:
   flyway:
     # 迁移权归 inventory-service（同库 ximu 防双写），本服务显式关闭 Flyway，不参与迁移
     enabled: false
+  mvc:
+    # R2-P2-30：未映射路径抛 NoHandlerFoundException，由 GlobalExceptionHandler 统一转 Result 404
+    throw-exception-if-no-handler-found: true
+  web:
+    resources:
+      # 纯 API 服务不托管静态资源（配合上面开关，避免静态资源兜底吞掉未匹配路径）
+      add-mappings: false
 
 # 跨域允许的前端来源（逗号分隔），统一走 CORS_ORIGINS 环境变量；生产按真实域名收紧，不要回退为 *
 app:
   cors:
     allowed-origins: "${CORS_ORIGINS:http://localhost:5173,http://localhost:3000}"
   # 内部共享令牌：与网关 GATEWAY_TOKEN 一致，校验请求确经网关（防直连伪造身份）。
-  # 无兜底值（P0-2）：缺 GATEWAY_TOKEN 启动即失败；dev profile 兜底 dev-shared-gateway-token；
-  # 需临时直连调试（curl 不带 X-Gateway-Token）可用环境变量 GATEWAY_TOKEN= 空串关闭校验。
+  # 无兜底值（R2-P1-4 fail-closed）：缺 GATEWAY_TOKEN 服务直接拒绝启动，不存在「空串关闭校验」逃生门；
+  # dev profile 兜底 dev-shared-gateway-token；直连调试（不经网关）须带 -H "X-Gateway-Token: <令牌>"。
   gateway-token: "${GATEWAY_TOKEN}"
   auth:
     # 生产保持 true（要求网关注入身份头）；仅本地开发可临时 false

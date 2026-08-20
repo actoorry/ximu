@@ -12,6 +12,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
@@ -69,10 +70,13 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String path = exchange.getRequest().getPath().value();
-        for (String prefix : skipPrefixes.split(",")) {
-            if (path.startsWith(prefix)) {
-                return chain.filter(exchange);
-            }
+        if (isSkippable(path)) {
+            // R2-P1-5：白名单路径跳过 JWT 校验但仍剥离客户端伪造的身份头与 Authorization，
+            // 防止客户端把伪造的 X-User-*/X-Gateway-Token 头一路带到下游服务
+            ServerHttpRequest mutated = exchange.getRequest().mutate()
+                    .headers(JwtAuthGlobalFilter::stripIdentityHeaders)
+                    .build();
+            return chain.filter(exchange.mutate().request(mutated).build());
         }
 
         String auth = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
@@ -101,13 +105,11 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
             String userName = uname == null ? "" : String.valueOf(uname);
             String roles = extractRoles(claims.get("roles"));
 
-            // 显式剥离客户端伪造的身份头，再注入网关校验后的可信值
+            // 显式剥离客户端伪造的身份头与原始 Authorization，再注入网关校验后的可信值
+            // （P2-1：Authorization 不剥离则把原始签名 token 泄露给下游，形成「下游可读取原始凭据」的过度暴露）
             ServerHttpRequest mutated = exchange.getRequest().mutate()
                     .headers(h -> {
-                        h.remove("X-User-Id");
-                        h.remove("X-User-Name");
-                        h.remove("X-User-Roles");
-                        h.remove("X-Gateway-Token");
+                        JwtAuthGlobalFilter.stripIdentityHeaders(h);
                         h.add("X-User-Id", userId);
                         h.add("X-User-Name", userName);
                         h.add("X-User-Roles", roles);
@@ -141,9 +143,59 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
                 .collect(Collectors.joining(","));
     }
 
+    /**
+     * 白名单前缀精确段匹配（R2-P1-5）：仅当 path 逐段等于任一前缀（或为其同段子路径）且
+     * 剩余段不含 "." / ".." 时放行。原 {@code startsWith(prefix)} 会把 "/actuator/../api/inbound"
+     * 之类含 {@code ..} 段的路径误判为命中白名单，绕过 JWT 校验直通业务接口。
+     * 编码形式（%2e）由下游 OperatorContextFilter 的 {@code getServletPath()}（解码后判定 /api/）兜底。
+     */
+    private boolean isSkippable(String path) {
+        for (String prefix : skipPrefixes.split(",")) {
+            String p = prefix.trim();
+            if (p.isEmpty()) {
+                continue;
+            }
+            if (isPathSegmentMatch(path, p)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** path 与白名单前缀按段精确匹配：等于前缀，或前缀后紧跟 "/" 且剩余段无 "." / ".." */
+    private boolean isPathSegmentMatch(String path, String prefix) {
+        if (!path.startsWith(prefix)) {
+            return false;
+        }
+        if (path.length() == prefix.length()) {
+            return true;
+        }
+        // 前缀后必须紧跟 "/"（防 "/actuatorX" 误命中 "/actuator" 白名单）；剩余段逐个拒绝 "." / ".."
+        if (path.charAt(prefix.length()) != '/') {
+            return false;
+        }
+        for (String seg : path.substring(prefix.length()).split("/")) {
+            if (".".equals(seg) || "..".equals(seg)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 剥离客户端可伪造的身份/凭据头（白名单跳过路径与正常校验路径共用；P2-1 顺带剥离 Authorization） */
+    private static void stripIdentityHeaders(HttpHeaders headers) {
+        headers.remove("X-User-Id");
+        headers.remove("X-User-Name");
+        headers.remove("X-User-Roles");
+        headers.remove("X-Gateway-Token");
+        headers.remove(HttpHeaders.AUTHORIZATION);
+    }
+
     private Mono<Void> unauthorized(ServerWebExchange exchange) {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatus.UNAUTHORIZED);
+        // P2-5：补 Content-Type，下游/前端按 JSON 解析错误体（原响应无 Content-Type，部分客户端解析失败）
+        response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
         byte[] bytes = "{\"code\":401,\"message\":\"未认证或令牌无效\",\"data\":null}"
                 .getBytes(StandardCharsets.UTF_8);
         DataBuffer buffer = response.bufferFactory().wrap(bytes);

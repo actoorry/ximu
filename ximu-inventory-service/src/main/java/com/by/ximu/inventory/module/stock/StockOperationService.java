@@ -3,7 +3,7 @@ package com.by.ximu.inventory.module.stock;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.by.ximu.common.DimsNormalizer;
 import com.by.ximu.common.OperatorContext;
-import com.by.ximu.inventory.module.log.OperationLogService;
+import com.by.ximu.common.web.audit.OperationLogService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -31,8 +31,7 @@ public class StockOperationService {
     private final InventoryStockMapper inventoryStockMapper;
     private final OperationLogService operationLogService;
 
-    /** 新建库存行时的默认库龄与预警阈值 */
-    private static final int DEFAULT_STOCK_AGE = 0;
+    /** 新建库存行时的默认库龄预警阈值 */
     private static final int DEFAULT_AGE_WARN_DAYS = 15;
 
     /**
@@ -64,7 +63,8 @@ public class StockOperationService {
                 inventoryStockMapper.insert(created);
                 return created;
             } catch (DuplicateKeyException e) {
-                stock = findStock(orgId, grade, productName, material, spec);
+                // R2-P2-25：撞键重查用 FOR UPDATE 当前读（快照读在此刻可能读不到对手未提交的行）
+                stock = findStockForUpdate(orgId, grade, productName, material, spec);
                 if (stock == null) {
                     throw new IllegalStateException("库存行创建并发异常，请重试", e);
                 }
@@ -142,7 +142,8 @@ public class StockOperationService {
                 inventoryStockMapper.insert(created);
                 return created;
             } catch (DuplicateKeyException e) {
-                stock = findStock(orgId, grade, productName, material, spec);
+                // R2-P2-25：撞键重查用 FOR UPDATE 当前读（快照读在此刻可能读不到对手未提交的行）
+                stock = findStockForUpdate(orgId, grade, productName, material, spec);
                 if (stock == null) {
                     throw new IllegalStateException("库存行创建并发异常，请重试", e);
                 }
@@ -200,6 +201,25 @@ public class StockOperationService {
         return inventoryStockMapper.selectOne(wrapper);
     }
 
+    /**
+     * 撞键重查专用：{@code FOR UPDATE} 当前读（R2-P2-25）。
+     *
+     * <p>InnoDB 默认 RR 隔离级别下，同一事务内的普通快照读基于事务首次读建立的 ReadView，
+     * 读不到并发对手「正在插入但未提交」的行——insert 撞 {@code uk_stock_dims} 后再用快照读重查
+     * 仍可能返回 null，于是误报「库存行创建并发异常」，与「重查后走乐观锁更新」的注释语义不符。
+     * 当前读直接读取最新已提交版本并加行锁（对手事务未提交时阻塞等待），保证撞键后必能读到对手插好的行。
+     */
+    private InventoryStock findStockForUpdate(Long orgId, String grade, String productName, String material, String spec) {
+        LambdaQueryWrapper<InventoryStock> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(InventoryStock::getOrgId, orgId);
+        wrapper.eq(InventoryStock::getProductName, productName);
+        wrapper.eq(InventoryStock::getMaterial, material == null ? "" : material);
+        wrapper.eq(InventoryStock::getSpec, spec == null ? "" : spec);
+        wrapper.eq(InventoryStock::getGrade, grade == null ? "" : grade);
+        wrapper.last("LIMIT 1 FOR UPDATE");
+        return inventoryStockMapper.selectOne(wrapper);
+    }
+
     /** 构造一条新建库存行（spec/grade 缺省归一为空串，其余走表默认值或业务默认值） */
     private InventoryStock newStock(Long orgId, String grade, String productName, String material, String spec, BigDecimal actualQty) {
         InventoryStock stock = new InventoryStock();
@@ -209,8 +229,6 @@ public class StockOperationService {
         stock.setSpec(spec == null ? "" : spec);
         stock.setGrade(grade == null ? "" : grade);
         stock.setActualQty(actualQty);
-        stock.setTransitQty(BigDecimal.ZERO);
-        stock.setStockAge(DEFAULT_STOCK_AGE);
         stock.setAgeWarnDays(DEFAULT_AGE_WARN_DAYS);
         stock.setFirstInboundAt(LocalDateTime.now());
         return stock;

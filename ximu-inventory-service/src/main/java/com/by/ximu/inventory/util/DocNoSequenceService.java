@@ -19,6 +19,11 @@ import java.time.format.DateTimeFormatter;
  * 必须发生在同一个 {@link java.sql.Connection} 上。这里通过 {@link JdbcTemplate#execute(ConnectionCallback)}
  * 在单个回调里完成 INSERT 与 SELECT，保证同连接。回调内部经 Spring {@code DataSourceUtils} 取连接，
  * 在已有事务中会复用事务连接，使序号写入与单据落库同事务、同连接。
+ *
+ * <p>吞吐说明（R2-P2-24）：取号语句对 {@code doc_no_seq} 当天行加行锁，且该锁会从取号持有到
+ * 建单事务提交（回调复用事务连接）；多实例高并发建单时当天行是天然串行点，吞吐受限于单行锁等待。
+ * 当前单量级下可接受（{@code synchronized} 仅作单机串行优化，非吞吐上限）；若压测确认成为瓶颈，
+ * 可拆「独立短事务取号」缩短锁持有时间。
  */
 @Service
 @RequiredArgsConstructor

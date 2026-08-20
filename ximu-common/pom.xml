@@ -15,10 +15,14 @@
     <description>公共模块：统一返回 Result / 分页基类 PageQuery</description>
 
     <dependencies>
-        <!-- 仅依赖 MyBatis-Plus 核心（提供 IPage 接口供 PageQuery.toPageMap 使用），不引入 Spring -->
+        <!-- 仅依赖 MyBatis-Plus（core 提供 IPage 供 toPageMap，extension 提供 Page 分页对象供 buildPage），不引入 Spring -->
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-extension</artifactId>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

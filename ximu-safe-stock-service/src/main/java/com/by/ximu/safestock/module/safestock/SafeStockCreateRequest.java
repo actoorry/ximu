@@ -2,6 +2,7 @@ package com.by.ximu.safestock.module.safestock;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -23,7 +24,8 @@ public class SafeStockCreateRequest {
     @NotNull(message = "组织(orgId)不能为空")
     private Long orgId;
 
-    /** 幂等键：同一操作人重复提交相同 requestId 返回已有配置，不重复建（可空） */
+    /** 幂等键：同一操作人重复提交相同 requestId 返回已有配置，不重复建（可空；R2-P2-11 长度上限 64 与列宽对齐，超长落库前拦截） */
+    @Size(max = 64, message = "requestId 长度不能超过 64")
     private String requestId;
 
     /** 有货率（%） */

@@ -20,10 +20,13 @@ public class CheckCreateRequest {
 
     /** 单号（可选，不传则后端自动生成） */
     /** 客户端幂等键（防双击/重试重复建单，可选） */
+    @Size(max = 64, message = "requestId 长度不能超过 64")
     private String requestId;
 
+    @Size(max = 64, message = "单号长度不能超过 64")
     private String checkNo;
 
+    @Size(max = 64, message = "批号长度不能超过 64")
     private String batchNo;
 
     /** 明细列表（推荐传多行商品） */

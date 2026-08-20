@@ -42,7 +42,10 @@ public class GatewaySecretChecker {
         if (jwtSecret == null || jwtSecret.isBlank()) {
             throw new IllegalStateException("JWT_SECRET 未配置：拒绝以空密钥启动（可自签任意身份 token）");
         }
-        if (LEAKED_DEFAULT_SECRET.equals(jwtSecret) || WEAK_PREFIXES.stream().anyMatch(jwtSecret::startsWith)) {
+        // P2-4：前缀比较前统一小写——运维配置 JWT_SECRET 为 "CHANGE-ME-..." 等大写变体时，
+        // 原区分大小写的 startsWith 会漏过弱密钥黑名单，导致泄露占位值带病上线
+        if (LEAKED_DEFAULT_SECRET.equals(jwtSecret)
+                || WEAK_PREFIXES.stream().anyMatch(prefix -> jwtSecret.toLowerCase().startsWith(prefix))) {
             throw new IllegalStateException("JWT_SECRET 为已知弱密钥/泄露默认值（旧默认密钥已进 git 历史视为泄露）："
                     + "请用 openssl rand -base64 48 生成新密钥后重启");
         }

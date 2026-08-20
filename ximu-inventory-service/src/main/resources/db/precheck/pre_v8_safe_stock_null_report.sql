@@ -7,7 +7,9 @@
 --       NOT NULL DEFAULT ''，并加 (org_id, product_name, material) 唯一键。
 --       存量 NULL 维度行会让 NOT NULL 化失败（迁移失败暴露，优于静默篡改）。
 --       NULL org_id/product_name 的配置行无法定位归属组织，无安全回填值，
---       需人工确认（补全维度 or 删除废行）后再执行迁移。
+--       需人工确认（补全维度 or 删除废行）后再执行迁移；
+--       material NULL 行由 V8 自动回填 ''（R2-P1-7，与库存五维的空串缺省一致，无信息丢失，
+--       此处仍列出留档供 DBA 确认符合预期）。
 -- ============================================================================
 
 -- 1. 将阻断 V8 NOT NULL 化的 NULL 维度行（逐行人工处理）
@@ -22,3 +24,9 @@ FROM inventory_safe_stock
 WHERE org_id IS NOT NULL AND product_name IS NOT NULL
 GROUP BY org_id, product_name, material
 HAVING COUNT(*) > 1;
+
+-- 3. R2-P1-7：将被 V8 回填为 '' 的 material NULL 行（自动回填，仅留档确认）
+SELECT id, org_id, product_name, material, service_level, z_value, version, created_at
+FROM inventory_safe_stock
+WHERE material IS NULL
+ORDER BY id;

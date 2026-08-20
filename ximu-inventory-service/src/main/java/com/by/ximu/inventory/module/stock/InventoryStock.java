@@ -38,11 +38,6 @@ public class InventoryStock {
 
     private BigDecimal actualQty;
 
-    private BigDecimal transitQty;
-
-    /** 库龄（天）（遗留静态列，恒 0；预警已优先使用 stockAgeDays 动态计算，此列保留兼容） */
-    private Integer stockAge;
-
     /** 库龄预警阈值（天） */
     private Integer ageWarnDays;
 
@@ -64,7 +59,7 @@ public class InventoryStock {
     @Version
     private Integer version;
 
-    /** 非表字段：库龄预警标记（动态优先：stockAgeDays >= ageWarnDays；stockAgeDays 为 null 时回退 stockAge >= ageWarnDays；ageWarnDays 为 null 时为 false） */
+    /** 非表字段：库龄预警标记（stockAgeDays 非 null 时按 stockAgeDays >= ageWarnDays 判定；ageWarnDays 为 null 时恒为 false） */
     @TableField(exist = false)
     private Boolean warn;
 
@@ -87,24 +82,20 @@ public class InventoryStock {
     }
 
     /**
-     * 库龄预警判定：动态值优先，静态值回退。
+     * 库龄预警判定：仅动态值判定（V10 已删 stock_age 静态列，无静态回退）。
      *
      * <p>规则：{@code ageWarnDays} 为 null 时恒为 false（保持现状）；
      * {@code stockAgeDays} 非 null 时按动态值 {@code stockAgeDays >= ageWarnDays} 判定；
-     * 否则回退遗留静态列 {@code stockAge != null && stockAge >= ageWarnDays}。
+     * 动态值不可得（firstInboundAt 为 null）时为 false。
      *
      * @param stockAgeDays 动态库龄天数（now - firstInboundAt），可为 null
-     * @param stockAge 遗留静态库龄列（newStock 恒置 0），可为 null
      * @param ageWarnDays 库龄预警阈值（天），可为 null
      * @return 是否触发库龄预警
      */
-    public static boolean isWarn(Long stockAgeDays, Integer stockAge, Integer ageWarnDays) {
+    public static boolean isWarn(Long stockAgeDays, Integer ageWarnDays) {
         if (ageWarnDays == null) {
             return false;
         }
-        if (stockAgeDays != null) {
-            return stockAgeDays >= ageWarnDays;
-        }
-        return stockAge != null && stockAge >= ageWarnDays;
+        return stockAgeDays != null && stockAgeDays >= ageWarnDays;
     }
 }

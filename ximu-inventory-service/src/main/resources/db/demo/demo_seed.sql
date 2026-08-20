@@ -71,14 +71,14 @@ INSERT INTO transfer_item (transfer_id, org_id, product_name, grade, material, s
     ((SELECT id FROM inventory_transfer WHERE transfer_no='TR20260808001'), 1, '铜管',        '合格', '铜',     'Φ20mm',  200.0000,  '华东仓'),
     ((SELECT id FROM inventory_transfer WHERE transfer_no='TR20260808002'), 2, '电解铜 B级', 'B级',  '电解铜', '99.95%', 50.0000,   '华南仓');
 
--- 库存统计种子（material 与明细对齐，避免五维裂变；库龄 >= age_warn_days 时前端标红预警）
+-- 库存统计种子（material 与明细对齐，避免五维裂变；库龄 >= age_warn_days 时前端标红预警；V10 已删 transit_qty/stock_age 两列）
 INSERT IGNORE INTO inventory_stock
-    (product_name, grade, material, spec, org_id, actual_qty, transit_qty, stock_age, age_warn_days, first_inbound_at)
+    (product_name, grade, material, spec, org_id, actual_qty, age_warn_days, first_inbound_at)
 VALUES
-    ('电解铜 A级', 'A级', '电解铜', '99.99%',  1, 3000.0000, 1000.0000, 20, 15, '2026-08-01 10:00:00'),
-    ('铜管',        '合格', '铜',     'Φ20mm',   1,  900.0000,    0.0000,  5, 15, '2026-08-10 09:00:00'),
-    ('电解铜 B级', 'B级', '电解铜', '99.95%',  2,  700.0000,  100.0000, 30, 15, '2026-07-20 10:00:00'),
-    ('铜板 1.5mm', '合格', '铜',     '1.5mm',   1,  500.0000,    0.0000,  8, 15, '2026-08-06 10:00:00');
+    ('电解铜 A级', 'A级', '电解铜', '99.99%',  1, 3000.0000, 15, '2026-08-01 10:00:00'),
+    ('铜管',        '合格', '铜',     'Φ20mm',   1,  900.0000, 15, '2026-08-10 09:00:00'),
+    ('电解铜 B级', 'B级', '电解铜', '99.95%',  2,  700.0000, 15, '2026-07-20 10:00:00'),
+    ('铜板 1.5mm', '合格', '铜',     '1.5mm',   1,  500.0000, 15, '2026-08-06 10:00:00');
 
 -- 批号种子
 INSERT IGNORE INTO inventory_batch

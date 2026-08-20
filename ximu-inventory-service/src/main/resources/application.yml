@@ -34,11 +34,12 @@ spring:
       mode: never
       encoding: UTF-8
   flyway:
-    # Flyway 是 ximu 库的唯一初始化路径（P0-4 收敛，data/ximu_init.sql 已废弃）：
-    #   - 空库：启动即执行 V1~V9 全量迁移（V6 起已清理迁移夹带的演示种子）；
-    #   - 存量库：baseline-on-migrate 打 baseline 5（当前主库为 data/ximu_init.sql 重建的 V5 结构、
-    #     无 history 表），从 V6 起增量执行；V7/V8 前先人工跑 db/precheck/pre_v7_item_qty_report.sql
-    #     与 pre_v8_safe_stock_null_report.sql 核对（V7 存量 NULL/负值、V8 safe_stock 维度 NULL）。
+    # Flyway 是 ximu 库的唯一初始化路径（P0-4 收敛，sql.init 恒 never）：
+    #   - 空库：启动即执行 V1~V10 全量迁移（V6 起已清理迁移夹带的演示种子）；
+    #   - 存量库：baseline-on-migrate 打 baseline 5（主库为 V5 结构、无 Flyway history 表），
+    #     从 V6 起增量执行；V7/V8 前先人工跑 db/precheck/pre_v7_item_qty_report.sql
+    #     与 pre_v8_safe_stock_null_report.sql 核对（V7 存量 NULL/负值、V8 safe_stock 维度 NULL）；
+    #     V10 前跑 db/precheck/pre_v10_transit_qty_report.sql 确认 transit_qty 无在途存量（预期 0 行）。
     #     注意：baseline-version 假设存量结构恰为 V1~V5 与迁移链完整对应，勿调低跳过未应用变更。
     #   - 演示数据：迁移完成后手工执行 db/demo/demo_seed.sql（Flyway 不加载该目录）。
     # dev 若仍想用 spring.sql.init 建表，可设 FLYWAY_ENABLED=false（二者别同时开，避免重复建表）。
@@ -46,14 +47,21 @@ spring:
     baseline-on-migrate: true
     baseline-version: 5
     locations: classpath:db/migration
+  mvc:
+    # R2-P2-30：未映射路径抛 NoHandlerFoundException，由 GlobalExceptionHandler 统一转 Result 404
+    throw-exception-if-no-handler-found: true
+  web:
+    resources:
+      # 纯 API 服务不托管静态资源（配合上面开关，避免静态资源兜底吞掉未匹配路径）
+      add-mappings: false
 
 # 跨域允许的前端来源（逗号分隔），统一走 CORS_ORIGINS 环境变量；生产按真实域名收紧，不要回退为 *
 app:
   cors:
     allowed-origins: "${CORS_ORIGINS:http://localhost:5173,http://localhost:3000}"
   # 内部共享令牌：与网关 GATEWAY_TOKEN 一致，校验请求确经网关（防直连伪造身份）。
-  # 无兜底值（P0-2）：缺 GATEWAY_TOKEN 启动即失败；dev profile 兜底 dev-shared-gateway-token；
-  # 需临时直连调试（curl 不带 X-Gateway-Token）可用环境变量 GATEWAY_TOKEN= 空串关闭校验。
+  # 无兜底值（R2-P1-4 fail-closed）：缺 GATEWAY_TOKEN 服务直接拒绝启动，不存在「空串关闭校验」逃生门；
+  # dev profile 兜底 dev-shared-gateway-token；直连调试（不经网关）须带 -H "X-Gateway-Token: <令牌>"。
   gateway-token: "${GATEWAY_TOKEN}"
   auth:
     # 生产保持 true（要求网关注入身份头）；仅本地开发可临时 false

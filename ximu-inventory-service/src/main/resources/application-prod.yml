@@ -39,10 +39,12 @@ spring:
       encoding: UTF-8
   flyway:
     # Flyway 迁移（inventory-service 独占库 ximu 的 DDL 迁移权，唯一初始化路径，见 P0-4）；生产固定开启
-    # 空库执行 V1~V6+ 全量；存量库 baseline 跳过 V1 从 V2 增量（V4 前先跑 db/precheck 差异核对）。
+    # 空库执行 V1~V10 全量；存量库 baseline-on-migrate 打 baseline 5（主库为 V5 结构、无 Flyway history 表），
+    # 从 V6 起增量；V7/V8 前先人工跑 db/precheck/pre_v7_item_qty_report.sql 与 pre_v8_safe_stock_null_report.sql 核对；
+    # V10 前跑 db/precheck/pre_v10_transit_qty_report.sql 确认 transit_qty 无在途存量（预期 0 行）。
     enabled: true
     baseline-on-migrate: true
-    baseline-version: 1
+    baseline-version: 5
     locations: classpath:db/migration
 
 # P2-3：生产关闭 API 文档端点（与 P0-5 的 public-paths 白名单 404 构成双保险：

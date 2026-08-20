@@ -6,9 +6,8 @@
 # =============================================================================
 
 app:
-  # 与 ximu-gateway application-dev.yml 的兜底值一致；
-  # 直连调试（不经网关）需带 -H "X-Gateway-Token: dev-shared-gateway-token"，
-  # 或用环境变量 GATEWAY_TOKEN= 空串临时关闭校验。
+  # 与 ximu-gateway application-dev.yml 的兜底值一致（R2-P1-4 fail-closed 后无「空串关闭校验」逃生门）；
+  # 直连调试（不经网关）需带 -H "X-Gateway-Token: dev-shared-gateway-token"。
   gateway-token: dev-shared-gateway-token
   auth:
     # dev 追加 swagger 文档路径（默认/生产不含 → 404，收敛暴露面）
