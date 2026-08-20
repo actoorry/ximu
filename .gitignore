@@ -1,14 +1,15 @@
 target/
 .m2-repo/
+tmp/
+data/
+*.log
+*.original
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
 
 ### IntelliJ IDEA ###
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/compiler.xml
-.idea/libraries/
+.idea/
 *.iws
 *.iml
 *.ipr
@@ -37,3 +38,11 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### 文档清理（2026-08-20：远端只保留 README/CLAUDE） ###
+ARCHITECTURE.md
+PRODUCTION-READINESS-PLAN.md
+HANDOVER.md
+修复方案.md
+错误清单.md
+任务要求-*.md
