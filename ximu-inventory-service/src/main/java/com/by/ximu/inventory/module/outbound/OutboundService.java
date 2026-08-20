@@ -9,6 +9,7 @@ import com.by.ximu.common.DocStatus;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Role;
+import com.by.ximu.inventory.common.DocGuard;
 import com.by.ximu.inventory.common.ItemValidators;
 import com.by.ximu.inventory.common.QuantitySupport;
 import com.by.ximu.inventory.common.RetrySupport;
@@ -109,17 +110,10 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
         try {
             save(head);
         } catch (DuplicateKeyException e) {
-            // R2-P2-23：撞键后败方立即回查大概率读不到对手尚未提交的行（对手事务仍持锁）——
-            // sleep 200ms 等对手提交后重查一次，仍查不到才按并发冲突拒绝（不再裸抛 DuplicateKey 落 400 固定文案）
-            Outbound existed = findByIdempotent(requestId);
-            if (existed == null) {
-                RetrySupport.sleepQuietly();
-                existed = findByIdempotent(requestId);
-            }
-            if (existed != null) {
-                return toVo(existed, listItems(existed.getId()));
-            }
-            throw new IllegalStateException("并发重复请求，请稍后重试");
+            // 并发下同 requestId 同时插入，唯一索引兜底：R2-P2-23 撞键后回查 → sleep 退避 → 再回查，
+            // 命中返回已存在单据，仍查不到才按并发冲突拒绝（不再裸抛 DuplicateKey 落 400 固定文案）
+            Outbound existed = RetrySupport.retryIdempotent(() -> findByIdempotent(requestId));
+            return toVo(existed, listItems(existed.getId()));
         }
         if (items != null) {
             for (OutboundItem it : items) {
@@ -137,19 +131,12 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
      */
     @Transactional
     public void approve(Long id) {
-        Outbound outbound = getById(id);
-        if (outbound == null) {
-            throw new IllegalArgumentException("出库单不存在: " + id);
-        }
+        Outbound outbound = DocGuard.requireExists(getById(id), "出库单", id);
         Auths.requireRole(Role.APPROVER, Role.ADMIN);
         Auths.requireNotSelfOrAdmin(outbound.getCreatedBy());
-        if (!DocStatus.CREATED.name().equals(outbound.getStatus())) {
-            throw new IllegalStateException("当前状态[" + outbound.getStatus() + "]不允许批准，仅 CREATED 状态可批准");
-        }
+        DocGuard.requireTransitionStatus(outbound.getStatus(), DocStatus.CREATED.name(), "批准");
         outbound.setStatus(DocStatus.APPROVED.name());
-        if (!updateById(outbound)) {
-            throw new IllegalStateException("单据已被他人操作，请刷新重试");
-        }
+        DocGuard.requireUpdateSucceeded(updateById(outbound));
         // 库存联动：按明细逐行扣减；先按五维键排序（P1-3），
         // 保证并发批准不同单据时对 inventory_stock 以一致行序加锁，消除交叉死锁
         List<OutboundItem> items = listItems(id);
@@ -176,9 +163,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
         if (head == null) {
             return;
         }
-        if (!DocStatus.CREATED.name().equals(head.getStatus())) {
-            throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
-        }
+        DocGuard.requireTransitionStatus(head.getStatus(), DocStatus.CREATED.name(), "删除");
         Auths.requireCreatorOrAdmin(head.getCreatedBy());
         int deleted = baseMapper.delete(new LambdaQueryWrapper<Outbound>()
                 .eq(Outbound::getId, id)
@@ -199,10 +184,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
      */
     @Transactional
     public void updateHead(Long id, OutboundUpdateRequest req) {
-        Outbound existed = getById(id);
-        if (existed == null) {
-            throw new IllegalArgumentException("出库单不存在: " + id);
-        }
+        Outbound existed = DocGuard.requireExists(getById(id), "出库单", id);
         if (!DocStatus.CREATED.name().equals(existed.getStatus())) {
             throw new IllegalStateException("仅 CREATED 状态可编辑");
         }

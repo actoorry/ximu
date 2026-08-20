@@ -9,6 +9,7 @@ import com.by.ximu.common.DocStatus;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Role;
+import com.by.ximu.inventory.common.DocGuard;
 import com.by.ximu.inventory.common.ItemValidators;
 import com.by.ximu.inventory.common.QuantitySupport;
 import com.by.ximu.inventory.common.RetrySupport;
@@ -106,17 +107,10 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         try {
             save(head);
         } catch (DuplicateKeyException e) {
-            // R2-P2-23：撞键后败方立即回查大概率读不到对手尚未提交的行（对手事务仍持锁）——
-            // sleep 200ms 等对手提交后重查一次，仍查不到才按并发冲突拒绝（不再裸抛 DuplicateKey 落 400 固定文案）
-            InventoryCheck existed = findByIdempotent(requestId);
-            if (existed == null) {
-                RetrySupport.sleepQuietly();
-                existed = findByIdempotent(requestId);
-            }
-            if (existed != null) {
-                return toVo(existed, listItems(existed.getId()));
-            }
-            throw new IllegalStateException("并发重复请求，请稍后重试");
+            // 并发下同 requestId 同时插入，唯一索引兜底：R2-P2-23 撞键后回查 → sleep 退避 → 再回查，
+            // 命中返回已存在单据，仍查不到才按并发冲突拒绝（不再裸抛 DuplicateKey 落 400 固定文案）
+            InventoryCheck existed = RetrySupport.retryIdempotent(() -> findByIdempotent(requestId));
+            return toVo(existed, listItems(existed.getId()));
         }
         if (items != null) {
             for (CheckItem it : items) {
@@ -134,19 +128,12 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
      */
     @Transactional
     public void approve(Long id) {
-        InventoryCheck check = getById(id);
-        if (check == null) {
-            throw new IllegalArgumentException("盘点单不存在: " + id);
-        }
+        InventoryCheck check = DocGuard.requireExists(getById(id), "盘点单", id);
         Auths.requireRole(Role.APPROVER, Role.ADMIN);
         Auths.requireNotSelfOrAdmin(check.getCreatedBy());
-        if (!DocStatus.CREATED.name().equals(check.getStatus())) {
-            throw new IllegalStateException("当前状态[" + check.getStatus() + "]不允许批准，仅 CREATED 状态可批准");
-        }
+        DocGuard.requireTransitionStatus(check.getStatus(), DocStatus.CREATED.name(), "批准");
         check.setStatus(DocStatus.APPROVED.name());
-        if (!updateById(check)) {
-            throw new IllegalStateException("单据已被他人操作，请刷新重试");
-        }
+        DocGuard.requireUpdateSucceeded(updateById(check));
         operationLogService.recordInTx("check", "APPROVE", id, check.getCheckNo(), OperatorContext.getOperatorName(), null);
     }
 
@@ -155,15 +142,10 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
      */
     @Transactional
     public void check(Long id) {
-        InventoryCheck check = getById(id);
-        if (check == null) {
-            throw new IllegalArgumentException("盘点单不存在: " + id);
-        }
+        InventoryCheck check = DocGuard.requireExists(getById(id), "盘点单", id);
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
         Auths.requireNotSelfOrAdmin(check.getCreatedBy());
-        if (!DocStatus.APPROVED.name().equals(check.getStatus())) {
-            throw new IllegalStateException("当前状态[" + check.getStatus() + "]不允许审核，仅 APPROVED 状态可审核");
-        }
+        DocGuard.requireTransitionStatus(check.getStatus(), DocStatus.APPROVED.name(), "审核");
         // 实盘数量必填校验（P1-2）：actualQty 为 null 的明细在校正联动时会被静默跳过，
         // 造成「盘点单已审核、库存却没盘」的假完成；审核前统一拒绝，让制单人补全后重新提交
         List<CheckItem> items = listItems(id);
@@ -175,9 +157,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
             }
         }
         check.setStatus(DocStatus.CHECKED.name());
-        if (!updateById(check)) {
-            throw new IllegalStateException("单据已被他人操作，请刷新重试");
-        }
+        DocGuard.requireUpdateSucceeded(updateById(check));
         // 库存联动：按明细逐行校正到实盘数量；先按五维键排序（P1-3），
         // 保证并发审核不同盘点单时对 inventory_stock 以一致行序加锁，消除交叉死锁
         items.sort(Comparator.comparing(it -> StockOperationService.dimsKey(
@@ -203,9 +183,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         if (head == null) {
             return;
         }
-        if (!DocStatus.CREATED.name().equals(head.getStatus())) {
-            throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
-        }
+        DocGuard.requireTransitionStatus(head.getStatus(), DocStatus.CREATED.name(), "删除");
         Auths.requireCreatorOrAdmin(head.getCreatedBy());
         int deleted = baseMapper.delete(new LambdaQueryWrapper<InventoryCheck>()
                 .eq(InventoryCheck::getId, id)
@@ -226,10 +204,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
      */
     @Transactional
     public void updateHead(Long id, CheckUpdateRequest req) {
-        InventoryCheck existed = getById(id);
-        if (existed == null) {
-            throw new IllegalArgumentException("盘点单不存在: " + id);
-        }
+        InventoryCheck existed = DocGuard.requireExists(getById(id), "盘点单", id);
         if (!DocStatus.CREATED.name().equals(existed.getStatus())) {
             throw new IllegalStateException("仅 CREATED 状态可编辑");
         }
