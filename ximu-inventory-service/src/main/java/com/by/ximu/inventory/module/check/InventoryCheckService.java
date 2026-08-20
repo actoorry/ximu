@@ -5,10 +5,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.by.ximu.common.Auths;
 import com.by.ximu.common.DimsNormalizer;
+import com.by.ximu.common.DocStatus;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Role;
-import com.by.ximu.inventory.module.log.OperationLogService;
+import com.by.ximu.inventory.common.ItemValidators;
+import com.by.ximu.inventory.common.QuantitySupport;
+import com.by.ximu.inventory.common.RetrySupport;
+import com.by.ximu.common.web.audit.OperationLogService;
 import com.by.ximu.inventory.module.stock.StockOperationService;
 import com.by.ximu.inventory.util.DocNoSequenceService;
 import lombok.RequiredArgsConstructor;
@@ -17,11 +21,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -57,16 +59,17 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
             wrapper.eq(InventoryCheck::getBatchNo, batchNo);
         }
         if (StringUtils.hasText(query.getKeyword())) {
+            // R2-P2-26：keyword 走 LIKE '%kw%'（前导通配）无法命中 V7 的 status/created_at 索引，
+            // 数据量大时全表扫——当前单量级可接受；若成瓶颈改前缀索引/全文检索或对账侧拉数据
             String kw = query.getKeyword();
             wrapper.and(w -> w.like(InventoryCheck::getCheckNo, kw)
                     .or().like(InventoryCheck::getBatchNo, kw));
         }
         wrapper.orderByDesc(InventoryCheck::getCreatedAt);
-        Page<InventoryCheck> p = baseMapper.selectPage(buildPage(query), wrapper);
-        Map<String, Object> map = new HashMap<>();
-        map.put("list", toVoList(p.getRecords()));
-        map.put("total", p.getTotal());
-        return map;
+        Page<InventoryCheck> p = baseMapper.selectPage(query.buildPage(), wrapper);
+        Page<CheckDetailVO> voPage = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
+        voPage.setRecords(toVoList(p.getRecords()));
+        return query.toPageMap(voPage);
     }
 
     /**
@@ -77,7 +80,6 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
      */
     @Transactional
     public CheckDetailVO create(CheckCreateRequest req) {
-        Auths.requireRole(Role.CREATOR, Role.ADMIN);
         // 幂等：requestId 非空时按「requestId + 当前操作人」查重（P1-7：复合幂等键）
         String requestId = req.getRequestId();
         if (StringUtils.hasText(requestId)) {
@@ -93,20 +95,28 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
             throw new IllegalArgumentException("盘点单号已存在: " + docNo);
         }
         List<CheckItem> items = normalizeItems(req);
+        // 明细至少一行（R2-P1-2）：normalizeItems 已把兼容单品转成明细，此处 items 为空即二者皆空，拒绝建空单
+        ItemValidators.requireNonEmpty(items, "盘点");
         InventoryCheck head = new InventoryCheck();
         head.setCheckNo(docNo);
         head.setBatchNo(req.getBatchNo());
-        head.setStatus("CREATED");
+        head.setStatus(DocStatus.CREATED.name());
         head.setCreatedBy(OperatorContext.getOperatorId());
         head.setRequestId(requestId);
         try {
             save(head);
         } catch (DuplicateKeyException e) {
+            // R2-P2-23：撞键后败方立即回查大概率读不到对手尚未提交的行（对手事务仍持锁）——
+            // sleep 200ms 等对手提交后重查一次，仍查不到才按并发冲突拒绝（不再裸抛 DuplicateKey 落 400 固定文案）
             InventoryCheck existed = findByIdempotent(requestId);
+            if (existed == null) {
+                RetrySupport.sleepQuietly();
+                existed = findByIdempotent(requestId);
+            }
             if (existed != null) {
                 return toVo(existed, listItems(existed.getId()));
             }
-            throw e;
+            throw new IllegalStateException("并发重复请求，请稍后重试");
         }
         if (items != null) {
             for (CheckItem it : items) {
@@ -130,10 +140,10 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         }
         Auths.requireRole(Role.APPROVER, Role.ADMIN);
         Auths.requireNotSelfOrAdmin(check.getCreatedBy());
-        if (!"CREATED".equals(check.getStatus())) {
+        if (!DocStatus.CREATED.name().equals(check.getStatus())) {
             throw new IllegalStateException("当前状态[" + check.getStatus() + "]不允许批准，仅 CREATED 状态可批准");
         }
-        check.setStatus("APPROVED");
+        check.setStatus(DocStatus.APPROVED.name());
         if (!updateById(check)) {
             throw new IllegalStateException("单据已被他人操作，请刷新重试");
         }
@@ -151,7 +161,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         }
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
         Auths.requireNotSelfOrAdmin(check.getCreatedBy());
-        if (!"APPROVED".equals(check.getStatus())) {
+        if (!DocStatus.APPROVED.name().equals(check.getStatus())) {
             throw new IllegalStateException("当前状态[" + check.getStatus() + "]不允许审核，仅 APPROVED 状态可审核");
         }
         // 实盘数量必填校验（P1-2）：actualQty 为 null 的明细在校正联动时会被静默跳过，
@@ -164,7 +174,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
                         + "，请补全后再审核");
             }
         }
-        check.setStatus("CHECKED");
+        check.setStatus(DocStatus.CHECKED.name());
         if (!updateById(check)) {
             throw new IllegalStateException("单据已被他人操作，请刷新重试");
         }
@@ -193,13 +203,13 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         if (head == null) {
             return;
         }
-        if (!"CREATED".equals(head.getStatus())) {
+        if (!DocStatus.CREATED.name().equals(head.getStatus())) {
             throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
         }
         Auths.requireCreatorOrAdmin(head.getCreatedBy());
         int deleted = baseMapper.delete(new LambdaQueryWrapper<InventoryCheck>()
                 .eq(InventoryCheck::getId, id)
-                .eq(InventoryCheck::getStatus, "CREATED"));
+                .eq(InventoryCheck::getStatus, DocStatus.CREATED.name()));
         if (deleted == 0) {
             throw new IllegalStateException("单据状态已变化或已被他人操作，删除失败，请刷新重试");
         }
@@ -220,7 +230,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         if (existed == null) {
             throw new IllegalArgumentException("盘点单不存在: " + id);
         }
-        if (!"CREATED".equals(existed.getStatus())) {
+        if (!DocStatus.CREATED.name().equals(existed.getStatus())) {
             throw new IllegalStateException("仅 CREATED 状态可编辑");
         }
         Auths.requireCreatorOrAdmin(existed.getCreatedBy());
@@ -273,6 +283,8 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
             if (req.getOrgId() == null) {
                 throw new IllegalArgumentException("组织(orgId)不能为空");
             }
+            // P2-19：兼容单品路径显式校验必填维度（actualQty 已由触发条件保证非空，productName 仍可能缺）
+            ItemValidators.requireHasText(req.getProductName(), "品名(productName)");
             CheckItem single = new CheckItem();
             single.setOrgId(req.getOrgId());
             single.setProductName(req.getProductName());
@@ -287,6 +299,8 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
                 it.setMaterial(DimsNormalizer.normalize(it.getMaterial()));
                 it.setSpec(DimsNormalizer.normalize(it.getSpec()));
                 it.setGrade(DimsNormalizer.normalize(it.getGrade()));
+                // R2-P1-1：账面数量 bookQty 必填（>=0；null 会被 NOT NULL DEFAULT 0 静默篡改为 0 的假账面）
+                ItemValidators.requireQtyNotNullOrNegative(it.getBookQty(), "盘点账面数量(bookQty)");
             }
         }
         return items;
@@ -318,29 +332,14 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         vo.setUpdatedAt(head.getUpdatedAt());
         vo.setVersion(head.getVersion());
         vo.setItems(items == null ? Collections.emptyList() : items);
-        vo.setTotalQty(sumActualQty(items));
+        vo.setTotalQty(QuantitySupport.sumQty(items, CheckItem::getActualQty));
         return vo;
     }
 
     /** 盘点汇总取实盘数量 actual_qty */
-    private BigDecimal sumActualQty(List<CheckItem> items) {
-        if (items == null || items.isEmpty()) {
-            return BigDecimal.ZERO;
-        }
-        return items.stream()
-                .map(i -> i.getActualQty() == null ? BigDecimal.ZERO : i.getActualQty())
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-
     /** 生成当天盘点单号（DB 原子取号，多实例安全） */
     private String nextDocNo() {
         return docNoSequenceService.next(PREFIX);
     }
 
-    private Page<InventoryCheck> buildPage(PageQuery query) {
-        int p = query.getPage() == null || query.getPage() < 1 ? 1 : query.getPage();
-        int s = query.getSize() == null || query.getSize() < 1 ? 10 : query.getSize();
-        s = Math.min(s, 200);
-        return new Page<>(p, s);
-    }
 }

@@ -1,9 +1,10 @@
 package com.by.ximu.inventory.module.log;
 
-import com.by.ximu.common.Auths;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
 import com.by.ximu.common.Role;
+import com.by.ximu.common.web.audit.OperationLogService;
+import com.by.ximu.common.web.security.RequireRole;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,11 +24,13 @@ public class OperationLogController {
     private final OperationLogService operationLogService;
 
     @GetMapping
+    @RequireRole({Role.ADMIN, Role.CHECKER})
     public Result<Map<String, Object>> list(PageQuery pageQuery,
                                             @RequestParam(required = false) String module,
                                             @RequestParam(required = false) String operation,
                                             @RequestParam(required = false) Long targetId) {
-        Auths.requireRole(Role.VIEWER, Role.ADMIN);
+        // R2-P2-20：日志 detail 含整份请求体（如司机电话等敏感字段），VIEWER 不再可检索；
+        // 仅 ADMIN/CHECKER（审计与运营角色）可查询
         return Result.ok(operationLogService.page(pageQuery, module, operation, targetId));
     }
 }

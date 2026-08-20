@@ -5,10 +5,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.by.ximu.common.Auths;
 import com.by.ximu.common.DimsNormalizer;
+import com.by.ximu.common.DocStatus;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Role;
-import com.by.ximu.inventory.module.log.OperationLogService;
+import com.by.ximu.inventory.common.ItemValidators;
+import com.by.ximu.inventory.common.QuantitySupport;
+import com.by.ximu.inventory.common.RetrySupport;
+import com.by.ximu.common.web.audit.OperationLogService;
 import com.by.ximu.inventory.module.stock.StockOperationService;
 import com.by.ximu.inventory.util.DocNoSequenceService;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +25,6 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -57,16 +60,17 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
             wrapper.eq(Inbound::getInboundType, inboundType);
         }
         if (StringUtils.hasText(query.getKeyword())) {
+            // R2-P2-26：keyword 走 LIKE '%kw%'（前导通配）无法命中 V7 的 status/created_at 索引，
+            // 数据量大时全表扫——当前单量级可接受；若成瓶颈改前缀索引/全文检索或对账侧拉数据
             String kw = query.getKeyword();
             wrapper.and(w -> w.like(Inbound::getInboundNo, kw)
                     .or().like(Inbound::getSourceOrderNo, kw));
         }
         wrapper.orderByDesc(Inbound::getCreatedAt);
-        Page<Inbound> p = baseMapper.selectPage(buildPage(query), wrapper);
-        Map<String, Object> map = new HashMap<>();
-        map.put("list", toVoList(p.getRecords()));
-        map.put("total", p.getTotal());
-        return map;
+        Page<Inbound> p = baseMapper.selectPage(query.buildPage(), wrapper);
+        Page<InboundDetailVO> voPage = new Page<>(p.getCurrent(), p.getSize(), p.getTotal());
+        voPage.setRecords(toVoList(p.getRecords()));
+        return query.toPageMap(voPage);
     }
 
     /**
@@ -77,7 +81,6 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
      */
     @Transactional
     public InboundDetailVO create(InboundCreateRequest req) {
-        Auths.requireRole(Role.CREATOR, Role.ADMIN);
         // 0. 幂等：requestId 非空时按「requestId + 当前操作人」查重（P1-7：复合幂等键，
         //    两个用户携带同一 requestId 重试互不串单），命中则返回已存在单据
         String requestId = req.getRequestId();
@@ -96,6 +99,8 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         }
         // 2. 兼容旧单品字段 → 明细
         List<InboundItem> items = normalizeItems(req);
+        // 2.5 明细至少一行（R2-P1-2）：normalizeItems 已把兼容单品转成明细，此处 items 为空即二者皆空，拒绝建空单
+        ItemValidators.requireNonEmpty(items, "入库");
         // 3. 保存头
         Inbound head = new Inbound();
         head.setInboundNo(docNo);
@@ -103,18 +108,24 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         head.setSourceOrderNo(req.getSourceOrderNo());
         head.setChecker(req.getChecker());
         head.setAuditLevel(req.getAuditLevel());
-        head.setStatus("CREATED");
+        head.setStatus(DocStatus.CREATED.name());
         head.setCreatedBy(OperatorContext.getOperatorId());
         head.setRequestId(requestId);
         try {
             save(head);
         } catch (DuplicateKeyException e) {
             // 并发下同 requestId 同时插入，唯一索引兜底：返回已存在的单据
+            // R2-P2-23：撞键后败方立即回查大概率读不到对手尚未提交的行（对手事务仍持锁）——
+            // sleep 200ms 等对手提交后重查一次，仍查不到才按并发冲突拒绝（不再裸抛 DuplicateKey 落 400 固定文案）
             Inbound existed = findByIdempotent(requestId);
+            if (existed == null) {
+                RetrySupport.sleepQuietly();
+                existed = findByIdempotent(requestId);
+            }
             if (existed != null) {
                 return toVo(existed, listItems(existed.getId()));
             }
-            throw e;
+            throw new IllegalStateException("并发重复请求，请稍后重试");
         }
         // 4. 保存明细
         if (items != null) {
@@ -141,10 +152,10 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         }
         Auths.requireRole(Role.APPROVER, Role.ADMIN);
         Auths.requireNotSelfOrAdmin(inbound.getCreatedBy());
-        if (!"CREATED".equals(inbound.getStatus())) {
+        if (!DocStatus.CREATED.name().equals(inbound.getStatus())) {
             throw new IllegalStateException("当前状态[" + inbound.getStatus() + "]不允许批准，仅 CREATED 状态可批准");
         }
-        inbound.setStatus("APPROVED");
+        inbound.setStatus(DocStatus.APPROVED.name());
         if (!updateById(inbound)) {
             throw new IllegalStateException("单据已被他人操作，请刷新重试");
         }
@@ -165,11 +176,11 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         }
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
         Auths.requireNotSelfOrAdmin(inbound.getCreatedBy());
-        if (!"APPROVED".equals(inbound.getStatus())) {
+        if (!DocStatus.APPROVED.name().equals(inbound.getStatus())) {
             throw new IllegalStateException("当前状态[" + inbound.getStatus() + "]不允许审核，仅 APPROVED 状态可审核");
         }
         String checker = requireOperatorName();
-        inbound.setStatus("CHECKED");
+        inbound.setStatus(DocStatus.CHECKED.name());
         inbound.setChecker(checker);
         if (!updateById(inbound)) {
             throw new IllegalStateException("单据已被他人操作，请刷新重试");
@@ -219,13 +230,13 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         if (head == null) {
             return;
         }
-        if (!"CREATED".equals(head.getStatus())) {
+        if (!DocStatus.CREATED.name().equals(head.getStatus())) {
             throw new IllegalStateException("当前状态[" + head.getStatus() + "]不允许删除，仅 CREATED 状态可删除");
         }
         Auths.requireCreatorOrAdmin(head.getCreatedBy());
         int deleted = baseMapper.delete(new LambdaQueryWrapper<Inbound>()
                 .eq(Inbound::getId, id)
-                .eq(Inbound::getStatus, "CREATED"));
+                .eq(Inbound::getStatus, DocStatus.CREATED.name()));
         if (deleted == 0) {
             throw new IllegalStateException("单据状态已变化或已被他人操作，删除失败，请刷新重试");
         }
@@ -246,7 +257,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         if (existed == null) {
             throw new IllegalArgumentException("入库单不存在: " + id);
         }
-        if (!"CREATED".equals(existed.getStatus())) {
+        if (!DocStatus.CREATED.name().equals(existed.getStatus())) {
             throw new IllegalStateException("仅 CREATED 状态可编辑");
         }
         Auths.requireCreatorOrAdmin(existed.getCreatedBy());
@@ -314,6 +325,11 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
                 it.setMaterial(DimsNormalizer.normalize(it.getMaterial()));
                 it.setSpec(DimsNormalizer.normalize(it.getSpec()));
                 it.setGrade(DimsNormalizer.normalize(it.getGrade()));
+                // R2-P1-1：qty 必填且 >0（@Positive 不拦 null，null/0 会在联动时静默跳过）；settleQty 可选但非空则必须 >0
+                ItemValidators.requireQtyPositive(it.getQty(), "入库明细数量(qty)");
+                if (it.getSettleQty() != null) {
+                    ItemValidators.requireQtyPositive(it.getSettleQty(), "结算数量(settleQty)");
+                }
             }
         }
         return items;
@@ -348,17 +364,8 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         vo.setUpdatedAt(head.getUpdatedAt());
         vo.setVersion(head.getVersion());
         vo.setItems(items == null ? Collections.emptyList() : items);
-        vo.setTotalQty(sumQty(items));
+        vo.setTotalQty(QuantitySupport.sumQty(items, InboundItem::getQty));
         return vo;
-    }
-
-    private BigDecimal sumQty(List<InboundItem> items) {
-        if (items == null || items.isEmpty()) {
-            return BigDecimal.ZERO;
-        }
-        return items.stream()
-                .map(i -> i.getQty() == null ? BigDecimal.ZERO : i.getQty())
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     /** 生成当天入库单号（DB 原子取号，多实例安全） */
@@ -366,10 +373,4 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         return docNoSequenceService.next(PREFIX);
     }
 
-    private Page<Inbound> buildPage(PageQuery query) {
-        int p = query.getPage() == null || query.getPage() < 1 ? 1 : query.getPage();
-        int s = query.getSize() == null || query.getSize() < 1 ? 10 : query.getSize();
-        s = Math.min(s, 200);
-        return new Page<>(p, s);
-    }
 }

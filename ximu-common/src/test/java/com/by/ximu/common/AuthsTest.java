@@ -15,7 +15,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <p>被测契约（与现状一致，勿随意改动）：</p>
  * <ul>
  *     <li>roles 存储的是角色枚举的 {@code name()}（如 {@code "ADMIN"}），匹配大小写敏感，小写 {@code "admin"} 不命中。</li>
- *     <li>{@code requireRole} 只按角色名精确匹配，不含 ADMIN 旁路（见下方「疑点固化」用例）。</li>
+ *     <li>{@code requireRole} 内置 ADMIN 旁路——ADMIN 通过任意角色要求（见下方「契约固化」用例，与
+ *     {@code requireCreatorOrAdmin / requireNotSelfOrAdmin} 的 isAdmin 旁路一致）。</li>
  * </ul>
  */
 class AuthsTest {

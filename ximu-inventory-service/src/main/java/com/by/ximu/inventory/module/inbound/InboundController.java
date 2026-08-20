@@ -1,15 +1,19 @@
 package com.by.ximu.inventory.module.inbound;
 
-import com.by.ximu.common.Auths;
+import com.by.ximu.common.DocStatus;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.Result;
 import com.by.ximu.common.Role;
+import com.by.ximu.common.web.security.RequireRole;
+import com.by.ximu.inventory.common.TransitionSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
 
 /**
@@ -32,20 +36,25 @@ public class InboundController {
     private static final Set<String> TRANSITION_KEYS = Set.of("id", "status", "action", "auditLevel", "checker", "operator");
 
     @GetMapping
+    @RequireRole({Role.VIEWER, Role.ADMIN})
     public Result<Map<String, Object>> list(PageQuery pageQuery,
                                             @RequestParam(required = false) String status,
                                             @RequestParam(required = false) String inboundType) {
-        Auths.requireRole(Role.VIEWER, Role.ADMIN);
         return Result.ok(inboundService.page(pageQuery, status, inboundType));
     }
 
     @GetMapping("/{id}")
+    @RequireRole({Role.VIEWER, Role.ADMIN})
     public Result<InboundDetailVO> get(@PathVariable Long id) {
-        Auths.requireRole(Role.VIEWER, Role.ADMIN);
-        return Result.ok(inboundService.getDetail(id));
+        InboundDetailVO vo = inboundService.getDetail(id);
+        if (vo == null) {
+            throw new NoSuchElementException("入库单不存在: " + id);
+        }
+        return Result.ok(vo);
     }
 
     @PostMapping
+    @RequireRole({Role.CREATOR, Role.ADMIN})
     public Result<InboundDetailVO> create(@Valid @RequestBody InboundCreateRequest req) {
         return Result.ok(inboundService.create(req));
     }
@@ -63,16 +72,21 @@ public class InboundController {
      */
     @PutMapping("/{id}")
     public Result<Void> updateOrTransition(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        if (isTransition(body)) {
+        if (TransitionSupport.isTransition(body)) {
+            // R2-P1-3：流转请求体仅允许 TRANSITION_KEYS 内字段，多余字段显式 400（不再静默降级为普通编辑）
+            TransitionSupport.requireTransitionBody(body, TRANSITION_KEYS);
             String action = String.valueOf(body.get("action"));
             switch (action) {
-                case "approve" -> { requireStatusMatch(body, "approve", "APPROVED"); inboundService.approve(id); }
-                case "check" -> { requireStatusMatch(body, "check", "CHECKED"); inboundService.check(id); }
+                case "approve" -> { requireStatusMatch(body, "approve", DocStatus.APPROVED.name()); inboundService.approve(id); }
+                case "check" -> { requireStatusMatch(body, "check", DocStatus.CHECKED.name()); inboundService.check(id); }
                 default -> throw new IllegalArgumentException("不支持的流转动作: " + action);
             }
             return Result.ok();
         }
-        inboundService.updateHead(id, objectMapper.convertValue(body, InboundUpdateRequest.class));
+        // 普通编辑：剥离 action 后绑定白名单 DTO（防御性剥离，body 已保证不含 action）
+        Map<String, Object> editBody = new HashMap<>(body);
+        editBody.remove("action");
+        inboundService.updateHead(id, objectMapper.convertValue(editBody, InboundUpdateRequest.class));
         return Result.ok();
     }
 
@@ -87,9 +101,5 @@ public class InboundController {
         if (body.containsKey("status") && !targetStatus.equals(body.get("status"))) {
             throw new IllegalArgumentException("status 与 action 不一致：action=" + action + " 的目标状态为 " + targetStatus);
         }
-    }
-
-    private boolean isTransition(Map<String, Object> body) {
-        return body.containsKey("action") && body.keySet().stream().allMatch(TRANSITION_KEYS::contains);
     }
 }
