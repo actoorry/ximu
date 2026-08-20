@@ -1,4 +1,4 @@
-package com.by.ximu.safestock.module.safestock;
+package com.by.ximu.common.web.audit;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;

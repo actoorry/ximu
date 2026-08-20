@@ -10,59 +10,51 @@
         <version>1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>ximu-inventory-service</artifactId>
-    <name>ximu-inventory-service</name>
-    <description>库存操作微服务：入库/出库/盘点/调拨/库存统计/批号/操作日志（端口 8081）</description>
+    <artifactId>ximu-common-web</artifactId>
+    <name>ximu-common-web</name>
+    <description>公共 Web 模块：servlet 基础设施收敛（身份过滤器/跨域/全局异常/审计填充/MyBatis-Plus 配置/操作日志），
+        inventory 与 safe-stock 两 servlet 服务共享，避免跨服务复制粘贴</description>
 
     <dependencies>
+        <!-- 公共库：Result/PageQuery/OperatorContext/Auths/Role 等 -->
         <dependency>
             <groupId>com.by</groupId>
             <artifactId>ximu-common</artifactId>
         </dependency>
-        <dependency>
-            <groupId>com.by</groupId>
-            <artifactId>ximu-common-web</artifactId>
-        </dependency>
+        <!-- servlet 基础设施：OperatorContextFilter/CorsConfig/GlobalExceptionHandler 等 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-aop</artifactId>
         </dependency>
+        <!-- MyBatis-Plus：MybatisPlusConfig 注册拦截器（extension 提供 interceptor，
+             core 提供 BaseMapper/实体注解，jsqlparser 供 PaginationInnerInterceptor；
+             IService/ServiceImpl 自 3.5.9 起拆至 mybatis-plus-spring，本模块直接依赖 extension 必须显式引入），
+             版本由根 pom 统一管理 -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-extension</artifactId>
         </dependency>
         <dependency>
             <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <artifactId>mybatis-plus-spring</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-core</artifactId>
         </dependency>
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-jsqlparser</artifactId>
         </dependency>
+        <!-- spring-tx：org.springframework.dao（DataIntegrityViolationException/DuplicateKeyException）
+             供 GlobalExceptionHandler 使用；mybatis-plus-spring 中 spring-jdbc 为 optional 不传递，须显式声明 -->
         <dependency>
-            <groupId>com.mysql</groupId>
-            <artifactId>mysql-connector-j</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-mysql</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-tx</artifactId>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
@@ -81,17 +73,6 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-            </plugin>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>repackage</goal>
-                        </goals>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

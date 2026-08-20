@@ -1,4 +1,4 @@
-package com.by.ximu.safestock.config;
+package com.by.ximu.common.web.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;

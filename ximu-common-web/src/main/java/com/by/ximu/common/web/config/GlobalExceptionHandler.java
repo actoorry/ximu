@@ -1,4 +1,4 @@
-package com.by.ximu.inventory.config;
+package com.by.ximu.common.web.config;
 
 import com.by.ximu.common.ForbiddenException;
 import com.by.ximu.common.Result;
@@ -11,7 +11,9 @@ import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
 
+import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
 
 /**
@@ -21,7 +23,7 @@ import java.util.stream.Collectors;
  * <p>状态码映射：403 越权 / 400 参数与校验 / 409 状态机与并发冲突 / 500 兜底。
  * body 内 {@code code} 语义保持不变（前端已有依赖：403/400/500 同值，业务冲突仍为 1）。
  *
- * <p>消息泄露面控制（P2-2）：业务异常（IAE/ISE）消息全部来自本服务 throw 点的业务文案，原样返回；
+ * <p>消息泄露面控制（P2-2）：业务异常（IAE/ISE）消息全部来自业务 throw 点的文案，原样返回；
  * 框架层异常（JSON 转换、数据完整性冲突）的 message 含 Java 类名/约束名/SQL 状态码，映射固定文案，明细只进日志。
  */
 @Slf4j
@@ -81,6 +83,21 @@ public class GlobalExceptionHandler {
                 .map(f -> f.getField() + ": " + f.getDefaultMessage())
                 .collect(Collectors.joining("; "));
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Result.error(400, msg));
+    }
+
+    /** 资源不存在（各 GET /{id} 未命中）→ HTTP 404（R2-P2-16/9：统一 Result 形态，替代 code=0 data=null） */
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<Result<Void>> handleNotFound(NoSuchElementException e) {
+        log.warn("资源不存在: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Result.error(404, e.getMessage()));
+    }
+
+    /** 未映射路径 → HTTP 404（R2-P2-30：需 yml 开 throw-exception-if-no-handler-found，统一 Result 形态） */
+    @ExceptionHandler(NoHandlerFoundException.class)
+    public ResponseEntity<Result<Void>> handleNoHandler(NoHandlerFoundException e) {
+        log.warn("路径未映射: {}", e.getRequestURL());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Result.error(404, "接口不存在: " + e.getRequestURL()));
     }
 
     /** 兜底异常：detail 只进日志，不返前端，避免泄露内部信息 → HTTP 500 */

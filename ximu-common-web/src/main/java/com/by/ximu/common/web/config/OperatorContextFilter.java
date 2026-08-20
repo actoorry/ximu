@@ -1,4 +1,4 @@
-package com.by.ximu.inventory.config;
+package com.by.ximu.common.web.config;
 
 import com.by.ximu.common.Operator;
 import com.by.ximu.common.OperatorContext;
@@ -13,8 +13,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 身份上下文过滤器：从网关注入的 X-User-* 头解析操作人，写入 OperatorContext，请求结束清理。
@@ -36,7 +39,7 @@ public class OperatorContextFilter extends OncePerRequestFilter {
     @Value("${app.auth.enabled:true}")
     private boolean authEnabled;
 
-    /** 内部共享令牌：非空时要求请求携带匹配的 X-Gateway-Token（证明请求经网关，防直连伪造身份） */
+    /** 内部共享令牌：auth.enabled=true 时恒要求请求携带匹配的 X-Gateway-Token（缺失拒绝启动，防直连伪造身份） */
     @Value("${app.gateway-token:}")
     private String gatewayToken;
 
@@ -45,14 +48,17 @@ public class OperatorContextFilter extends OncePerRequestFilter {
     private String publicPaths;
 
     /**
-     * 启动告警（P1 残留点）：令牌留空时网关令牌校验整体跳过（fail-open），
-     * 任何能直连本服务的请求都可伪造 X-User-* 头——配置遗漏必须在启动日志里显式暴露，
-     * 不能零告警静默降级。开发环境（dev profile 已配共享令牌）不应出现本告警。
+     * 启动期 fail-fast（R2-P1-4）：auth.enabled=true 时网关令牌必填，缺失/留空直接拒绝启动。
+     * 原实现仅 WARN 且运行时校验整体跳过（fail-open），运维按旧注释「GATEWAY_TOKEN= 空串关闭校验」
+     * 配置后会静默放行所有直连伪造身份请求；现改为与网关 GatewaySecretChecker 一致的 fail-fast 哲学。
+     * dev profile 有兜底令牌（dev-shared-gateway-token），不受影响。
      */
     @PostConstruct
-    void warnIfGatewayTokenMissing() {
-        if (gatewayToken == null || gatewayToken.isBlank()) {
-            log.warn("app.gateway-token 未配置：X-Gateway-Token 校验将被跳过，直连本服务可伪造身份头；生产环境必须配置该令牌");
+    void failFastIfGatewayTokenMissing() {
+        if (authEnabled && (gatewayToken == null || gatewayToken.isBlank())) {
+            throw new IllegalStateException(
+                    "app.gateway-token 未配置：auth.enabled=true 时网关令牌必填（缺失则无法证明请求经网关，"
+                    + "直连本服务可伪造 X-User-* 身份头），拒绝启动");
         }
     }
 
@@ -64,13 +70,15 @@ public class OperatorContextFilter extends OncePerRequestFilter {
             String path = request.getServletPath();
             if (path.startsWith("/api/")) {
                 if (authEnabled) {
-                    // 网关令牌校验：配置了内部令牌时，直连请求（无 X-Gateway-Token 或值不匹配）一律拒绝
-                    if (gatewayToken != null && !gatewayToken.isBlank()) {
-                        String token = request.getHeader("X-Gateway-Token");
-                        if (token == null || !gatewayToken.equals(token)) {
-                            writeUnauthorized(response);
-                            return;
-                        }
+                    // R2-P1-4：auth.enabled=true 时恒要求 X-Gateway-Token 匹配（令牌必填已在启动期 fail-fast，
+                    // 不存在「留空跳过校验」的逃生门）；恒定时间比较（P2-6）防时序侧信道
+                    String token = request.getHeader("X-Gateway-Token");
+                    if (token == null || gatewayToken == null || gatewayToken.isBlank()
+                            || !MessageDigest.isEqual(
+                                    gatewayToken.getBytes(StandardCharsets.UTF_8),
+                                    token.getBytes(StandardCharsets.UTF_8))) {
+                        writeUnauthorized(response);
+                        return;
                     }
                     String userId = request.getHeader("X-User-Id");
                     String userName = request.getHeader("X-User-Name");
@@ -85,9 +93,14 @@ public class OperatorContextFilter extends OncePerRequestFilter {
                         writeUnauthorized(response);
                         return;
                     }
+                    // P2-21：逐项 trim 后过滤空段，防「ADMIN, VIEWER」中 " VIEWER" 因前导空格被 403 误拒
                     String rolesHeader = request.getHeader("X-User-Roles");
                     List<String> roles = (rolesHeader == null || rolesHeader.isBlank())
-                            ? List.of() : Arrays.asList(rolesHeader.split(","));
+                            ? List.of()
+                            : Arrays.stream(rolesHeader.split(","))
+                                    .map(String::trim)
+                                    .filter(role -> !role.isEmpty())
+                                    .collect(Collectors.toList());
                     OperatorContext.set(new Operator(uid, userName, roles));
                 } else {
                     OperatorContext.set(new Operator(0L, "dev", List.of("ADMIN")));

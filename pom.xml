@@ -13,6 +13,7 @@
 
     <modules>
         <module>ximu-common</module>
+        <module>ximu-common-web</module>
         <module>ximu-inventory-service</module>
         <module>ximu-safe-stock-service</module>
         <module>ximu-gateway</module>
@@ -66,6 +67,18 @@
                 <artifactId>mybatis-plus-core</artifactId>
                 <version>${mybatis-plus.version}</version>
             </dependency>
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-extension</artifactId>
+                <version>${mybatis-plus.version}</version>
+            </dependency>
+            <!-- IService/ServiceImpl 自 3.5.9 起从 mybatis-plus-extension 拆至 mybatis-plus-spring，
+                 直接依赖 extension 的模块（如 ximu-common-web）须显式引入本模块 -->
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-spring</artifactId>
+                <version>${mybatis-plus.version}</version>
+            </dependency>
             <!-- OpenAPI 文档（不在 Spring Boot BOM 中，手动管理版本） -->
             <dependency>
                 <groupId>org.springdoc</groupId>
@@ -76,6 +89,11 @@
             <dependency>
                 <groupId>com.by</groupId>
                 <artifactId>ximu-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.by</groupId>
+                <artifactId>ximu-common-web</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>
@@ -102,5 +120,53 @@
                 </plugin>
             </plugins>
         </pluginManagement>
+        <plugins>
+            <!-- P0-1 CI/CD：质量报告插件（组长决策"先报告后门禁"——只生成覆盖率/测试报告，不加 check goal、不设门禁） -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>enforce-java</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>17</version>
+                                </requireJavaVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 </project>

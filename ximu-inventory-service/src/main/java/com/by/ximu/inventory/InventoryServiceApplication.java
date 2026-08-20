@@ -9,7 +9,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  *
  * <p>操作同一个库存账本，强一致性；包含入库/出库/盘点/调拨/库存统计/批号/操作日志 7 个子模块。
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {"com.by.ximu.inventory", "com.by.ximu.common.web"})
 @MapperScan({
         "com.by.ximu.inventory.module.inbound",
         "com.by.ximu.inventory.module.outbound",
@@ -17,7 +17,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
         "com.by.ximu.inventory.module.transfer",
         "com.by.ximu.inventory.module.stock",
         "com.by.ximu.inventory.module.batch",
-        "com.by.ximu.inventory.module.log"
+        "com.by.ximu.inventory.module.log",
+        "com.by.ximu.common.web.audit"
 })
 public class InventoryServiceApplication {
 

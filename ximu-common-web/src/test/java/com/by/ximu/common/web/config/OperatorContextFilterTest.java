@@ -1,4 +1,4 @@
-package com.by.ximu.inventory.config;
+package com.by.ximu.common.web.config;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * {@link OperatorContextFilter} P0-5 路径判定回归：
  * ① {@code /api;x/...} 形态的路径参数不可绕过身份校验（判定用 getServletPath 而非 getRequestURI）；
  * ② 白名单外非 /api/ 路径直接 404；③ 白名单内路径（actuator health/info）正常放行。
- * safe-stock 服务的同款 Filter 为复制实现，行为以本类为代表锁定。
+ * 本过滤器已收敛到 ximu-common-web，inventory 与 safe-stock 两服务共用同一实现。
  */
 class OperatorContextFilterTest {
 
@@ -68,5 +68,56 @@ class OperatorContextFilterTest {
 
         assertNotNull(chain.getRequest(), "actuator 健康检查应放行");
         assertEquals(200, response.getStatus());
+    }
+
+    // ===== P2-6：GATEWAY_TOKEN 校验 =====
+
+    @Test
+    void 正确GATEWAY_TOKEN_放行() throws Exception {
+        ReflectionTestUtils.setField(filter, "gatewayToken", "gateway-token-abc");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/inventory/stock");
+        request.setServletPath("/api/inventory/stock");
+        request.addHeader("X-Gateway-Token", "gateway-token-abc");
+        request.addHeader("X-User-Id", "1");
+        request.addHeader("X-User-Name", "操作员");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertNotNull(chain.getRequest(), "正确令牌 + 身份头应放行");
+        assertEquals(200, response.getStatus());
+    }
+
+    @Test
+    void 错误令牌_401() throws Exception {
+        ReflectionTestUtils.setField(filter, "gatewayToken", "gateway-token-abc");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/inventory/stock");
+        request.setServletPath("/api/inventory/stock");
+        request.addHeader("X-Gateway-Token", "wrong-token");
+        request.addHeader("X-User-Id", "1");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertNull(chain.getRequest(), "令牌不匹配不得放行");
+        assertEquals(401, response.getStatus());
+    }
+
+    @Test
+    void 缺XUserId_401() throws Exception {
+        ReflectionTestUtils.setField(filter, "gatewayToken", "gateway-token-abc");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/inventory/stock");
+        request.setServletPath("/api/inventory/stock");
+        request.addHeader("X-Gateway-Token", "gateway-token-abc");
+        // 未带 X-User-Id：无法确定操作人身份，拒绝
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertNull(chain.getRequest(), "缺 X-User-Id 不得放行");
+        assertEquals(401, response.getStatus());
     }
 }

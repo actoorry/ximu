@@ -1,4 +1,4 @@
-package com.by.ximu.safestock.config;
+package com.by.ximu.common.web.config;
 
 import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;

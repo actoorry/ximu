@@ -1,7 +1,6 @@
-package com.by.ximu.inventory.module.log;
+package com.by.ximu.common.web.audit;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.by.ximu.common.PageQuery;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -34,7 +33,10 @@ public class OperationLogService extends ServiceImpl<OperationLogMapper, Operati
      * @param targetNo  目标单据编号
      * @param operator  操作人
      * @param detail    操作详情（任意对象，序列化为 JSON；可为 null）
+     * @deprecated R2-P2-27：业务写一律走 {@link #recordInTx}（审计与业务同事务、失败即回滚），
+     *     本方法吞异常会静默丢审计；当前无调用点，仅作兜底保留（删除需确认，见错误清单 P2-27）。
      */
+    @Deprecated
     public void record(String module, String operation, Long targetId, String targetNo, String operator, Object detail) {
         try {
             OperationLog entity = new OperationLog();
@@ -102,13 +104,6 @@ public class OperationLogService extends ServiceImpl<OperationLogMapper, Operati
                     .or().like(OperationLog::getOperator, kw));
         }
         wrapper.orderByDesc(OperationLog::getCreatedAt);
-        return query.toPageMap(baseMapper.selectPage(buildPage(query), wrapper));
-    }
-
-    private Page<OperationLog> buildPage(PageQuery query) {
-        int p = query.getPage() == null || query.getPage() < 1 ? 1 : query.getPage();
-        int s = query.getSize() == null || query.getSize() < 1 ? 10 : query.getSize();
-        s = Math.min(s, 200);
-        return new Page<>(p, s);
+        return query.toPageMap(baseMapper.selectPage(query.buildPage(), wrapper));
     }
 }

@@ -1,4 +1,4 @@
-package com.by.ximu.inventory.module.log;
+package com.by.ximu.common.web.audit;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
@@ -12,7 +12,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 操作日志实体。
+ * 操作日志实体（inventory 与 safe-stock 两微服务共享同一张 operation_log 表，同库 ximu）。
  */
 @Data
 @TableName("operation_log")
@@ -21,7 +21,7 @@ public class OperationLog {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 业务模块：inbound/outbound/check/transfer/stock/batch */
+    /** 业务模块：inbound/outbound/check/transfer/stock/batch/safe-stock 等 */
     private String module;
 
     /** 操作类型：CREATE/UPDATE/DELETE/APPROVE/CHECK/COMPLETE */
@@ -30,7 +30,7 @@ public class OperationLog {
     /** 目标单据 ID */
     private Long targetId;
 
-    /** 目标单据编号 */
+    /** 目标单据编号/标识（安全库存无独立单号，以商品名近似） */
     private String targetNo;
 
     /** 操作人 */
