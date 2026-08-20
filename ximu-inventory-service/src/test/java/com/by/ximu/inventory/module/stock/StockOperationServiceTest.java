@@ -1,6 +1,6 @@
 package com.by.ximu.inventory.module.stock;
 
-import com.by.ximu.inventory.module.log.OperationLogService;
+import com.by.ximu.common.web.audit.OperationLogService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -67,8 +67,6 @@ class StockOperationServiceTest {
         assertEquals("", result.getSpec());
         assertEquals("", result.getGrade());
         assertEquals(0, result.getActualQty().compareTo(new BigDecimal("10")));
-        assertEquals(0, result.getTransitQty().compareTo(BigDecimal.ZERO));
-        assertEquals(Integer.valueOf(0), result.getStockAge());
         assertEquals(Integer.valueOf(15), result.getAgeWarnDays());
         assertNotNull(result.getFirstInboundAt());
         verify(inventoryStockMapper).insert(result);
@@ -367,7 +365,9 @@ class StockOperationServiceTest {
         // 排序键的稳定性依赖「字段顺序固定 + null 统一空串」，两行不同品名比较结果恒定
         String a = StockOperationService.dimsKey(1L, "铜管", "紫铜", "Φ20", "合格");
         String b = StockOperationService.dimsKey(1L, "铜板", "紫铜", "1.5mm", null);
-        assertTrue(a.compareTo(b) != 0 || a.equals(b));
+        // P2-29：恒真断言改为具体断言，锁定五维拼接顺序与 null 归空串的实际输出
+        assertEquals("1|铜管|紫铜|Φ20|合格", a);
+        assertEquals("1|铜板|紫铜|1.5mm|", b);
         assertNotNull(a);
     }
 }

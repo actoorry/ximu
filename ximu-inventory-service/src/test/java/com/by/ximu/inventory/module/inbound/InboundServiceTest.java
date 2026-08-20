@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.by.ximu.common.Operator;
 import com.by.ximu.common.OperatorContext;
-import com.by.ximu.inventory.module.log.OperationLogService;
+import com.by.ximu.common.web.audit.OperationLogService;
 import com.by.ximu.inventory.module.stock.StockOperationService;
 import com.by.ximu.inventory.util.DocNoSequenceService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -19,8 +19,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.math.BigDecimal;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -32,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -205,6 +208,108 @@ class InboundServiceTest {
         assertTrue(params.contains("req-abc"), "幂等回查条件应包含 requestId");
         assertTrue(params.contains(7L), "幂等回查条件应包含当前操作人 ID（P1-7 复合幂等键）");
         verify(inboundService, never()).save(any());
+    }
+
+    // ===== P2-6：创建并发/唯一 + 删除/编辑状态与乐观锁补齐 =====
+
+    @Test
+    void create_撞键_重查命中返回已有() {
+        OperatorContext.set(new Operator(7L, "制单人", List.of("CREATOR")));
+        Inbound existed = new Inbound();
+        existed.setId(910L);
+        existed.setInboundNo("IN-CK-001");
+        existed.setStatus("CREATED");
+        // 第一次幂等回查未命中（null），撞键后重查命中（existed）→ 返回已有
+        doReturn(null).doReturn(existed).when(inboundService).getOne(any(), eq(false));
+        doReturn(Collections.emptyList()).when(inboundService).listItems(910L);
+        doThrow(new DuplicateKeyException("uk_inbound_request_id")).when(inboundService).save(any(Inbound.class));
+
+        InboundCreateRequest req = new InboundCreateRequest();
+        req.setRequestId("req-ck");
+        req.setItems(List.of(inboundSampleItem()));
+        InboundDetailVO vo = inboundService.create(req);
+
+        assertEquals(910L, vo.getId(), "撞键后重查命中应返回已有单据");
+    }
+
+    @Test
+    void create_撞键_重查未中_抛并发() {
+        OperatorContext.set(new Operator(7L, "制单人", List.of("CREATOR")));
+        // 幂等回查、撞键后立即重查、sleep 后重查三次均未命中 → 并发冲突
+        doReturn(null, null, null).when(inboundService).getOne(any(), eq(false));
+        doThrow(new DuplicateKeyException("uk_inbound_request_id")).when(inboundService).save(any(Inbound.class));
+
+        InboundCreateRequest req = new InboundCreateRequest();
+        req.setRequestId("req-dup");
+        req.setItems(List.of(inboundSampleItem()));
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> inboundService.create(req));
+        assertTrue(ex.getMessage().contains("并发重复请求"));
+    }
+
+    @Test
+    void create_单号已存在_抛400() {
+        doReturn(1L).when(inboundService).count(any());
+        InboundCreateRequest req = new InboundCreateRequest();
+        req.setInboundNo("IN-EXISTS");
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> inboundService.create(req));
+        assertTrue(ex.getMessage().contains("入库单号已存在"));
+    }
+
+    @Test
+    void delete_非CREATED_抛异常() {
+        OperatorContext.set(new Operator(1L, "制单人", List.of("ADMIN")));
+        Inbound inbound = new Inbound();
+        inbound.setId(920L);
+        inbound.setInboundNo("IN-DEL-001");
+        inbound.setStatus("APPROVED");
+        inbound.setCreatedBy(1L);
+        doReturn(inbound).when(inboundService).getById(920L);
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> inboundService.deleteWithItems(920L));
+        assertTrue(ex.getMessage().contains("仅 CREATED 状态可删除"));
+    }
+
+    @Test
+    void updateHead_乐观锁冲突_抛异常() {
+        OperatorContext.set(new Operator(1L, "制单人", List.of("CREATOR")));
+        Inbound existed = new Inbound();
+        existed.setId(930L);
+        existed.setInboundNo("IN-UPD-001");
+        existed.setStatus("CREATED");
+        existed.setCreatedBy(1L);
+        doReturn(existed).when(inboundService).getById(930L);
+        doReturn(false).when(inboundService).updateById(any());
+        InboundUpdateRequest req = new InboundUpdateRequest();
+        req.setInboundType("直接审核");
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> inboundService.updateHead(930L, req));
+        assertTrue(ex.getMessage().contains("并发冲突"));
+    }
+
+    @Test
+    void updateHead_非CREATED_抛异常() {
+        OperatorContext.set(new Operator(1L, "制单人", List.of("CREATOR")));
+        Inbound existed = new Inbound();
+        existed.setId(930L);
+        existed.setInboundNo("IN-UPD-001");
+        existed.setStatus("APPROVED");
+        existed.setCreatedBy(1L);
+        doReturn(existed).when(inboundService).getById(930L);
+        InboundUpdateRequest req = new InboundUpdateRequest();
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> inboundService.updateHead(930L, req));
+        assertTrue(ex.getMessage().contains("仅 CREATED 状态可编辑"));
+    }
+
+    private static InboundItem inboundSampleItem() {
+        InboundItem item = new InboundItem();
+        item.setOrgId(1L);
+        item.setProductName("铜管");
+        item.setGrade("A");
+        item.setQty(new BigDecimal("10"));
+        return item;
     }
 
     private Inbound approvedInbound(long id, String docNo) {
