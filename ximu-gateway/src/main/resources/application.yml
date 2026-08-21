@@ -10,10 +10,14 @@
 
 server:
   port: 8080
+  # 优雅停机：网关先行摘流量（LB 摘除→SIGTERM→等在途转发完成），再触发下游业务服务停机
+  shutdown: graceful
 
 spring:
   application:
     name: ximu-gateway
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   cloud:
     gateway:
       routes:

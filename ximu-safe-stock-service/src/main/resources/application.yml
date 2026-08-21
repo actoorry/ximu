@@ -13,10 +13,14 @@
 
 server:
   port: 8082
+  # 优雅停机（上线清单补强）：同 inventory-service，SIGTERM 后等待在途请求完成再关闭
+  shutdown: graceful
 
 spring:
   application:
     name: ximu-safe-stock-service
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   datasource:
     url: "${DB_URL:jdbc:mysql://localhost:3306/ximu?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8&connectionCollation=utf8mb4_0900_ai_ci}"
     username: "${DB_USERNAME:root}"
@@ -73,6 +77,10 @@ management:
       exposure:
         include: health,info
 
+# 日志行携带请求追踪 ID（RequestTraceIdFilter 从网关注入的 X-Request-Id 写入 MDC；
+# 无请求上下文（启动期/异步任务）时 reqId 为空）
 logging:
+  pattern:
+    level: "%5p [reqId=%X{reqId}]"
   level:
     com.by.ximu: info

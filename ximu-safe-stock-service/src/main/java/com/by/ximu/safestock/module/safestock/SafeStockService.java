@@ -6,6 +6,7 @@ import com.by.ximu.common.DimsNormalizer;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.PageQuery;
 import com.by.ximu.common.web.audit.OperationLogService;
+import com.by.ximu.common.web.log.BizLog;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -44,6 +45,7 @@ public class SafeStockService extends ServiceImpl<SafeStockMapper, SafeStock> {
     }
 
     @Transactional
+    @BizLog(module = "safestock", operation = "CREATE", message = "安全库存配置创建成功（幂等键+维度唯一+审计）")
     public SafeStock create(SafeStockCreateRequest req) {
         // 幂等：requestId 非空时 trim 后按「requestId + 当前操作人」查重（R2-P2-11：trim 防空白前缀/尾缀致幂等失效；V8 复合唯一键兜底）
         String requestId = StringUtils.hasText(req.getRequestId()) ? req.getRequestId().trim() : null;
@@ -83,6 +85,7 @@ public class SafeStockService extends ServiceImpl<SafeStockMapper, SafeStock> {
     }
 
     @Transactional
+    @BizLog(module = "safestock", operation = "UPDATE", message = "安全库存配置 {id} 更新成功（白名单字段）")
     public void update(Long id, SafeStock entity) {
         SafeStock existed = getById(id);
         if (existed == null) {
@@ -134,6 +137,7 @@ public class SafeStockService extends ServiceImpl<SafeStockMapper, SafeStock> {
     }
 
     @Transactional
+    @BizLog(module = "safestock", operation = "DELETE", message = "安全库存配置 {id} 删除成功（条件删除+乐观锁）")
     public void delete(Long id, Integer requestedVersion) {
         SafeStock existed = getById(id);
         if (existed == null) {

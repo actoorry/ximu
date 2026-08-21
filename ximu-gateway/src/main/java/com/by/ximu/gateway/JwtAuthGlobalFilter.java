@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -41,6 +42,11 @@ import java.util.stream.Stream;
  *   <li>iss/aud 校验：配置了 app.jwt.issuer / audience 时强制匹配（防其他系统签发的同密钥
  *       token 混用），留空不校验（向后兼容存量签发方）。</li>
  * </ul>
+ *
+ * <p>全链路请求追踪（上线清单补强）：客户端携带 X-Request-Id 时透传（可信来源：前端 APM/网关链路），
+ * 否则生成 UUID；该 ID 随请求转发到下游，下游 RequestTraceIdFilter 写入 MDC 落日志，
+ * 一个请求跨「网关→业务服务」的日志可用同一 reqId 串联。伪造无关紧要：reqId 仅用于日志关联，
+ * 不承载任何身份/授权语义。
  */
 @Component
 public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
@@ -79,6 +85,12 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
             return chain.filter(exchange.mutate().request(mutated).build());
         }
 
+        // 全链路请求追踪：客户端带了 X-Request-Id（APM/上游网关注入）则透传，否则生成 UUID
+        String requestId = exchange.getRequest().getHeaders().getFirst("X-Request-Id");
+        if (requestId == null || requestId.isBlank()) {
+            requestId = UUID.randomUUID().toString();
+        }
+
         String auth = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         if (auth == null || !auth.startsWith("Bearer ")) {
             return unauthorized(exchange);
@@ -107,6 +119,7 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
 
             // 显式剥离客户端伪造的身份头与原始 Authorization，再注入网关校验后的可信值
             // （P2-1：Authorization 不剥离则把原始签名 token 泄露给下游，形成「下游可读取原始凭据」的过度暴露）
+            final String reqId = requestId;
             ServerHttpRequest mutated = exchange.getRequest().mutate()
                     .headers(h -> {
                         JwtAuthGlobalFilter.stripIdentityHeaders(h);
@@ -116,6 +129,7 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
                         if (gatewayToken != null && !gatewayToken.isBlank()) {
                             h.add("X-Gateway-Token", gatewayToken);
                         }
+                        h.set("X-Request-Id", reqId);
                     })
                     .build();
             return chain.filter(exchange.mutate().request(mutated).build());

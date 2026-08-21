@@ -16,7 +16,9 @@ import com.by.ximu.inventory.common.RetrySupport;
 import com.by.ximu.common.web.audit.OperationLogService;
 import com.by.ximu.inventory.module.stock.StockOperationService;
 import com.by.ximu.inventory.util.DocNoSequenceService;
+import com.by.ximu.common.web.log.BizLog;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +39,7 @@ import java.util.stream.Collectors;
  * <p>流转前置校验：仅 CREATED 可批准；仅 APPROVED 可审核；非法迁移抛 {@link IllegalStateException}。
  * <p>审核（CHECKED）后按明细逐行联动增加 {@code inventory_stock} 库存，与状态流转同事务，任一步失败整体回滚。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
@@ -81,6 +84,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
      * <p>兼容：{@code items} 为空但传了旧单品字段（{@code productName/qty}）时自动转成一条明细。
      */
     @Transactional
+    @BizLog(module = "inbound", operation = "CREATE", message = "入库单创建成功（单号取号+明细+审计）")
     public InboundDetailVO create(InboundCreateRequest req) {
         // 0. 幂等：requestId 非空时按「requestId + 当前操作人」查重（P1-7：复合幂等键，
         //    两个用户携带同一 requestId 重试互不串单），命中则返回已存在单据
@@ -88,6 +92,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         if (StringUtils.hasText(requestId)) {
             Inbound existed = findByIdempotent(requestId);
             if (existed != null) {
+                log.info("入库单幂等命中: requestId={}, 返回既有单据 {}", requestId, existed.getInboundNo());
                 return toVo(existed, listItems(existed.getId()));
             }
         }
@@ -118,6 +123,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
             // 并发下同 requestId 同时插入，唯一索引兜底：R2-P2-23 撞键后回查 → sleep 退避 → 再回查，
             // 命中返回已存在单据，仍查不到才按并发冲突拒绝（不再裸抛 DuplicateKey 落 400 固定文案）
             Inbound existed = RetrySupport.retryIdempotent(() -> findByIdempotent(requestId));
+            log.info("入库单并发撞键后幂等回查命中: requestId={}, 返回既有单据 {}", requestId, existed.getInboundNo());
             return toVo(existed, listItems(existed.getId()));
         }
         // 4. 保存明细
@@ -129,6 +135,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
             }
         }
         operationLogService.recordInTx("inbound", "CREATE", head.getId(), head.getInboundNo(), OperatorContext.getOperatorName(), req);
+        log.info("入库单创建: {} 明细{}行, 操作人={}", head.getInboundNo(), items == null ? 0 : items.size(), OperatorContext.getOperatorName());
         return toVo(head, items);
     }
 
@@ -138,6 +145,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
      * <p>审核级别（auditLevel）为制单人建单/编辑时指定的业务字段，流转不再接受请求体覆盖（P0-1）。
      */
     @Transactional
+    @BizLog(module = "inbound", operation = "APPROVE", message = "入库单 {id} 批准成功 CREATED→APPROVED")
     public void approve(Long id) {
         Inbound inbound = DocGuard.requireExists(getById(id), "入库单", id);
         Auths.requireRole(Role.APPROVER, Role.ADMIN);
@@ -147,6 +155,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         DocGuard.requireUpdateSucceeded(updateById(inbound));
         operationLogService.recordInTx("inbound", "APPROVE", id, inbound.getInboundNo(), OperatorContext.getOperatorName(),
                 Map.of("auditLevel", inbound.getAuditLevel() == null ? "" : inbound.getAuditLevel()));
+        log.info("入库单流转: {} CREATED -> APPROVED, 操作人={}", inbound.getInboundNo(), OperatorContext.getOperatorName());
     }
 
     /**
@@ -155,6 +164,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
      * <p>审核人不信任请求体（P0-1），一律取 {@link OperatorContext#getOperatorName()}。
      */
     @Transactional
+    @BizLog(module = "inbound", operation = "CHECK", message = "入库单 {id} 审核成功 APPROVED→CHECKED（库存联动）")
     public void check(Long id) {
         Inbound inbound = DocGuard.requireExists(getById(id), "入库单", id);
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
@@ -175,6 +185,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
         }
         operationLogService.recordInTx("inbound", "CHECK", id, inbound.getInboundNo(), OperatorContext.getOperatorName(),
                 Map.of("checker", checker));
+        log.info("入库单流转: {} APPROVED -> CHECKED, 库存联动{}行, 操作人={}", inbound.getInboundNo(), items.size(), checker);
     }
 
     /** 审核人必须来自可信登录上下文；缺失说明过滤器链异常，宁可拒绝落库也不写空值/伪造值 */
@@ -201,6 +212,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
      * 状态条件足以阻断窗口（任何流转必改 status），影响 0 行即并发冲突抛异常，明细删除随之回滚。
      */
     @Transactional
+    @BizLog(module = "inbound", operation = "DELETE", message = "入库单 {id} 删除成功（级联删明细）")
     public void deleteWithItems(Long id) {
         if (id == null) {
             return;
@@ -229,6 +241,7 @@ public class InboundService extends ServiceImpl<InboundMapper, Inbound> {
      * <p>编辑与审计同事务；乐观锁冲突时抛异常提示刷新重试。
      */
     @Transactional
+    @BizLog(module = "inbound", operation = "UPDATE", message = "入库单 {id} 头部编辑成功（白名单字段）")
     public void updateHead(Long id, InboundUpdateRequest req) {
         Inbound existed = DocGuard.requireExists(getById(id), "入库单", id);
         if (!DocStatus.CREATED.name().equals(existed.getStatus())) {

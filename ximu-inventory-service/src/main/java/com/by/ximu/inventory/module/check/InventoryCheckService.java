@@ -14,9 +14,11 @@ import com.by.ximu.inventory.common.ItemValidators;
 import com.by.ximu.inventory.common.QuantitySupport;
 import com.by.ximu.inventory.common.RetrySupport;
 import com.by.ximu.common.web.audit.OperationLogService;
+import com.by.ximu.common.web.log.BizLog;
 import com.by.ximu.inventory.module.stock.StockOperationService;
 import com.by.ximu.inventory.util.DocNoSequenceService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +38,7 @@ import java.util.stream.Collectors;
  * <p>流转前置校验：仅 CREATED 可批准；仅 APPROVED 可审核；非法迁移抛 {@link IllegalStateException}。
  * <p>审核（CHECKED）后按明细逐行联动校正 {@code inventory_stock}（{@code actual_qty = 明细实盘值}）。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, InventoryCheck> {
@@ -80,12 +83,14 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
      * <p>兼容：{@code items} 为空但传了旧单品字段（{@code actualQty}）时自动转成一条明细。
      */
     @Transactional
+    @BizLog(module = "check", operation = "CREATE", message = "盘点单创建成功（单号取号+明细+审计）")
     public CheckDetailVO create(CheckCreateRequest req) {
         // 幂等：requestId 非空时按「requestId + 当前操作人」查重（P1-7：复合幂等键）
         String requestId = req.getRequestId();
         if (StringUtils.hasText(requestId)) {
             InventoryCheck existed = findByIdempotent(requestId);
             if (existed != null) {
+                log.info("盘点单幂等命中: requestId={}, 返回既有单据 {}", requestId, existed.getCheckNo());
                 return toVo(existed, listItems(existed.getId()));
             }
         }
@@ -110,6 +115,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
             // 并发下同 requestId 同时插入，唯一索引兜底：R2-P2-23 撞键后回查 → sleep 退避 → 再回查，
             // 命中返回已存在单据，仍查不到才按并发冲突拒绝（不再裸抛 DuplicateKey 落 400 固定文案）
             InventoryCheck existed = RetrySupport.retryIdempotent(() -> findByIdempotent(requestId));
+            log.info("盘点单并发撞键后幂等回查命中: requestId={}, 返回既有单据 {}", requestId, existed.getCheckNo());
             return toVo(existed, listItems(existed.getId()));
         }
         if (items != null) {
@@ -120,6 +126,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
             }
         }
         operationLogService.recordInTx("check", "CREATE", head.getId(), head.getCheckNo(), OperatorContext.getOperatorName(), req);
+        log.info("盘点单创建: {} 明细{}行, 操作人={}", head.getCheckNo(), items == null ? 0 : items.size(), OperatorContext.getOperatorName());
         return toVo(head, items);
     }
 
@@ -127,6 +134,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
      * 批准：CREATED → APPROVED。
      */
     @Transactional
+    @BizLog(module = "check", operation = "APPROVE", message = "盘点单 {id} 批准成功 CREATED→APPROVED")
     public void approve(Long id) {
         InventoryCheck check = DocGuard.requireExists(getById(id), "盘点单", id);
         Auths.requireRole(Role.APPROVER, Role.ADMIN);
@@ -135,12 +143,14 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
         check.setStatus(DocStatus.APPROVED.name());
         DocGuard.requireUpdateSucceeded(updateById(check));
         operationLogService.recordInTx("check", "APPROVE", id, check.getCheckNo(), OperatorContext.getOperatorName(), null);
+        log.info("盘点单流转: {} CREATED -> APPROVED, 操作人={}", check.getCheckNo(), OperatorContext.getOperatorName());
     }
 
     /**
      * 审核：APPROVED → CHECKED；按明细逐行联动校正库存（{@code actual_qty = 明细实盘值}）。
      */
     @Transactional
+    @BizLog(module = "check", operation = "CHECK", message = "盘点单 {id} 审核成功 APPROVED→CHECKED（库存校正+差异流水）")
     public void check(Long id) {
         InventoryCheck check = DocGuard.requireExists(getById(id), "盘点单", id);
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
@@ -166,6 +176,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
             stockOperationService.adjustStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getMaterial(), it.getSpec(), it.getActualQty());
         }
         operationLogService.recordInTx("check", "CHECK", id, check.getCheckNo(), OperatorContext.getOperatorName(), null);
+        log.info("盘点单流转: {} APPROVED -> CHECKED, 库存校正{}行, 操作人={}", check.getCheckNo(), items.size(), OperatorContext.getOperatorName());
     }
 
     /**
@@ -175,6 +186,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
      * 状态条件足以阻断窗口（任何流转必改 status），影响 0 行即并发冲突抛异常，明细删除随之回滚。
      */
     @Transactional
+    @BizLog(module = "check", operation = "DELETE", message = "盘点单 {id} 废弃删除成功（级联删明细）")
     public void deleteWithItems(Long id) {
         if (id == null) {
             return;
@@ -203,6 +215,7 @@ public class InventoryCheckService extends ServiceImpl<InventoryCheckMapper, Inv
      * <p>编辑与审计同事务；乐观锁冲突时抛异常提示刷新重试。
      */
     @Transactional
+    @BizLog(module = "check", operation = "UPDATE", message = "盘点单 {id} 头部编辑成功（白名单字段）")
     public void updateHead(Long id, CheckUpdateRequest req) {
         InventoryCheck existed = DocGuard.requireExists(getById(id), "盘点单", id);
         if (!DocStatus.CREATED.name().equals(existed.getStatus())) {

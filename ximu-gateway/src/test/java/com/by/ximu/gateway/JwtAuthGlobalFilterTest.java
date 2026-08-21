@@ -26,6 +26,7 @@ import java.util.Date;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -86,6 +87,39 @@ class JwtAuthGlobalFilterTest {
         assertEquals("VIEWER", headers.getFirst("X-User-Roles"), "注入白名单内角色");
         assertEquals(GATEWAY_TOKEN, headers.getFirst("X-Gateway-Token"), "注入内部共享令牌");
         assertNull(headers.getFirst(HttpHeaders.AUTHORIZATION), "原始签名 token 不得泄露给下游（P2-1）");
+        assertNotNull(headers.getFirst("X-Request-Id"), "缺 X-Request-Id 时网关生成 UUID 注入（全链路追踪）");
+    }
+
+    @Test
+    void 客户端携带XRequestId_透传到下游() {
+        String token = sign("1", 1L, "操作员", List.of("VIEWER"), future());
+        MockServerHttpRequest request = MockServerHttpRequest.get("/api/inventory/stock")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .header("X-Request-Id", "client-req-42")
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(request);
+        when(chain.filter(any(ServerWebExchange.class))).thenReturn(Mono.empty());
+
+        filter.filter(exchange, chain);
+
+        ServerWebExchange mutated = capturedMutatedExchange();
+        assertEquals("client-req-42", mutated.getRequest().getHeaders().getFirst("X-Request-Id"),
+                "客户端已带 X-Request-Id（APM/上游链路）时透传，保证跨系统同一 reqId");
+    }
+
+    @Test
+    void 白名单路径也注入XRequestId() {
+        MockServerHttpRequest request = MockServerHttpRequest.get("/actuator/health")
+                .header("X-Request-Id", "health-req-7")
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(request);
+        when(chain.filter(any(ServerWebExchange.class))).thenReturn(Mono.empty());
+
+        filter.filter(exchange, chain);
+
+        ServerWebExchange mutated = capturedMutatedExchange();
+        assertEquals("health-req-7", mutated.getRequest().getHeaders().getFirst("X-Request-Id"),
+                "白名单路径跳过 JWT 但仍透传 reqId（actuator 代理场景可观测）");
     }
 
     @Test

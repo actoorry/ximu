@@ -13,6 +13,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,7 +45,8 @@ class DocNoSequenceServiceTest {
     private DocNoSequenceService docNoSequenceService;
 
     private static String today() {
-        return LocalDate.now().format(DATE_FMT);
+        // 与 DocNoSequenceService 的业务时区保持一致（钉定 Asia/Shanghai，CI 在 UTC runner 上跑也不漂移）
+        return LocalDate.now(ZoneId.of("Asia/Shanghai")).format(DATE_FMT);
     }
 
     /** 让 mocked JdbcTemplate 把 execute 收到的回调直接作用于给定 Connection */

@@ -5,6 +5,7 @@ import com.by.ximu.common.DimsNormalizer;
 import com.by.ximu.common.OperatorContext;
 import com.by.ximu.common.web.audit.OperationLogService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +25,7 @@ import java.util.Map;
  * <p>匹配规则：{@code org_id + product_name + material + spec + grade} 五维精确匹配；material/spec/grade 缺省（null）归一为空串。
  * 命中既有行则用 {@code @Version} 乐观锁更新；未命中则按入库/盘点语义新建一行。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class StockOperationService {
@@ -61,6 +63,7 @@ public class StockOperationService {
             InventoryStock created = newStock(orgId, grade, productName, material, spec, qty);
             try {
                 inventoryStockMapper.insert(created);
+                log.info("库存联动(入库-新建行): {} 现存={}", dimsKey(orgId, productName, material, spec, grade), created.getActualQty());
                 return created;
             } catch (DuplicateKeyException e) {
                 // R2-P2-25：撞键重查用 FOR UPDATE 当前读（快照读在此刻可能读不到对手未提交的行）
@@ -75,6 +78,7 @@ public class StockOperationService {
         if (inventoryStockMapper.updateById(stock) == 0) {
             throw new IllegalStateException("库存并发冲突，请重试（入库）");
         }
+        log.info("库存联动(入库): {} +{} -> {}", dimsKey(orgId, productName, material, spec, grade), qty, stock.getActualQty());
         return stock;
     }
 
@@ -111,6 +115,7 @@ public class StockOperationService {
             // 抛异常使调用方事务（outbound.approve）整体回滚，避免「单据已流转但库存未扣」的超卖。
             throw new IllegalStateException("库存并发冲突，请重试（出库）: " + productName);
         }
+        log.info("库存联动(出库): {} -{} -> {}", dimsKey(orgId, productName, material, spec, grade), qty, stock.getActualQty());
         return stock;
     }
 
@@ -140,6 +145,7 @@ public class StockOperationService {
             InventoryStock created = newStock(orgId, grade, productName, material, spec, actualQty);
             try {
                 inventoryStockMapper.insert(created);
+                log.info("库存联动(盘点-新建行): {} 现存={}", dimsKey(orgId, productName, material, spec, grade), created.getActualQty());
                 return created;
             } catch (DuplicateKeyException e) {
                 // R2-P2-25：撞键重查用 FOR UPDATE 当前读（快照读在此刻可能读不到对手未提交的行）
@@ -154,6 +160,7 @@ public class StockOperationService {
         if (inventoryStockMapper.updateById(stock) == 0) {
             throw new IllegalStateException("库存并发冲突，请重试（盘点）");
         }
+        log.info("库存联动(盘点): {} {} -> {} (差异 {})", dimsKey(orgId, productName, material, spec, grade), before, actualQty, actualQty.subtract(before));
         // 盘盈盘亏流水：账面与实盘差异落审计（正值盘盈、负值盘亏）
         BigDecimal diff = actualQty.subtract(before);
         if (diff.signum() != 0) {

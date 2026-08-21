@@ -14,8 +14,10 @@ import com.by.ximu.inventory.common.ItemValidators;
 import com.by.ximu.inventory.common.QuantitySupport;
 import com.by.ximu.inventory.common.RetrySupport;
 import com.by.ximu.common.web.audit.OperationLogService;
+import com.by.ximu.common.web.log.BizLog;
 import com.by.ximu.inventory.util.DocNoSequenceService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +36,7 @@ import java.util.stream.Collectors;
  * <p>流转前置校验：仅 CREATED 可批准；仅 APPROVED 可完成；非法迁移抛 {@link IllegalStateException}。
  * <p>调拨是库位间转移，总量不变；完成（COMPLETED）不联动库存数量（stock 表无库位维度），仅记录明细。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
@@ -77,12 +80,14 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
      * <p>兼容：{@code items} 为空但传了旧单品字段（{@code productName/qty/targetLocation}）时自动转成一条明细。
      */
     @Transactional
+    @BizLog(module = "transfer", operation = "CREATE", message = "调拨单创建成功（单号取号+明细+审计）")
     public TransferDetailVO create(TransferCreateRequest req) {
         // 幂等：requestId 非空时按「requestId + 当前操作人」查重（P1-7：复合幂等键）
         String requestId = req.getRequestId();
         if (StringUtils.hasText(requestId)) {
             Transfer existed = findByIdempotent(requestId);
             if (existed != null) {
+                log.info("调拨单幂等命中: requestId={}, 返回既有单据 {}", requestId, existed.getTransferNo());
                 return toVo(existed, listItems(existed.getId()));
             }
         }
@@ -107,6 +112,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
             // 并发下同 requestId 同时插入，唯一索引兜底：R2-P2-23 撞键后回查 → sleep 退避 → 再回查，
             // 命中返回已存在单据，仍查不到才按并发冲突拒绝（不再裸抛 DuplicateKey 落 400 固定文案）
             Transfer existed = RetrySupport.retryIdempotent(() -> findByIdempotent(requestId));
+            log.info("调拨单并发撞键后幂等回查命中: requestId={}, 返回既有单据 {}", requestId, existed.getTransferNo());
             return toVo(existed, listItems(existed.getId()));
         }
         if (items != null) {
@@ -117,6 +123,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
             }
         }
         operationLogService.recordInTx("transfer", "CREATE", head.getId(), head.getTransferNo(), OperatorContext.getOperatorName(), req);
+        log.info("调拨单创建: {} 明细{}行, 操作人={}", head.getTransferNo(), items == null ? 0 : items.size(), OperatorContext.getOperatorName());
         return toVo(head, items);
     }
 
@@ -124,6 +131,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
      * 批准：CREATED → APPROVED。
      */
     @Transactional
+    @BizLog(module = "transfer", operation = "APPROVE", message = "调拨单 {id} 批准成功 CREATED→APPROVED")
     public void approve(Long id) {
         Transfer transfer = DocGuard.requireExists(getById(id), "调拨单", id);
         Auths.requireRole(Role.APPROVER, Role.ADMIN);
@@ -132,6 +140,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
         transfer.setStatus(DocStatus.APPROVED.name());
         DocGuard.requireUpdateSucceeded(updateById(transfer));
         operationLogService.recordInTx("transfer", "APPROVE", id, transfer.getTransferNo(), OperatorContext.getOperatorName(), null);
+        log.info("调拨单流转: {} CREATED -> APPROVED, 操作人={}", transfer.getTransferNo(), OperatorContext.getOperatorName());
     }
 
     /**
@@ -140,6 +149,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
      * <p>调拨为库位间转移，总量不变，不联动库存数量。
      */
     @Transactional
+    @BizLog(module = "transfer", operation = "COMPLETE", message = "调拨单 {id} 完成成功 APPROVED→COMPLETED（库位转移+库存联动）")
     public void complete(Long id) {
         Transfer transfer = DocGuard.requireExists(getById(id), "调拨单", id);
         Auths.requireRole(Role.CHECKER, Role.ADMIN);
@@ -148,6 +158,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
         transfer.setStatus(DocStatus.COMPLETED.name());
         DocGuard.requireUpdateSucceeded(updateById(transfer));
         operationLogService.recordInTx("transfer", "COMPLETE", id, transfer.getTransferNo(), OperatorContext.getOperatorName(), null);
+        log.info("调拨单流转: {} APPROVED -> COMPLETED, 操作人={}", transfer.getTransferNo(), OperatorContext.getOperatorName());
     }
 
     /**
@@ -157,6 +168,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
      * 状态条件足以阻断窗口（任何流转必改 status），影响 0 行即并发冲突抛异常，明细删除随之回滚。
      */
     @Transactional
+    @BizLog(module = "transfer", operation = "DELETE", message = "调拨单 {id} 撤销删除成功（级联删明细）")
     public void deleteWithItems(Long id) {
         if (id == null) {
             return;
@@ -185,6 +197,7 @@ public class TransferService extends ServiceImpl<TransferMapper, Transfer> {
      * <p>编辑与审计同事务；乐观锁冲突时抛异常提示刷新重试。
      */
     @Transactional
+    @BizLog(module = "transfer", operation = "UPDATE", message = "调拨单 {id} 头部编辑成功（白名单字段）")
     public void updateHead(Long id, TransferUpdateRequest req) {
         Transfer existed = DocGuard.requireExists(getById(id), "调拨单", id);
         if (!DocStatus.CREATED.name().equals(existed.getStatus())) {

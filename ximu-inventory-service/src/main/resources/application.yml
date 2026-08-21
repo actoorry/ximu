@@ -13,10 +13,15 @@
 
 server:
   port: 8081
+  # 优雅停机（上线清单补强）：SIGTERM 后停止接收新请求，等在途请求完成（上限见 lifecycle.timeout）再关闭，
+  # 滚动重启/发布不掐断在途事务（账本类服务尤其需要：半途断开=事务回滚但客户端已收到超时）
+  shutdown: graceful
 
 spring:
   application:
     name: ximu-inventory-service
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   datasource:
     url: "${DB_URL:jdbc:mysql://localhost:3306/ximu?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8&connectionCollation=utf8mb4_0900_ai_ci}"
     username: "${DB_USERNAME:root}"
@@ -84,6 +89,10 @@ management:
       exposure:
         include: health,info
 
+# 日志行携带请求追踪 ID（RequestTraceIdFilter 从网关注入的 X-Request-Id 写入 MDC；
+# 无请求上下文（启动期/异步任务）时 reqId 为空）
 logging:
+  pattern:
+    level: "%5p [reqId=%X{reqId}]"
   level:
     com.by.ximu: info

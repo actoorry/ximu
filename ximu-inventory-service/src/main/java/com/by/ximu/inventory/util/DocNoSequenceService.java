@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
 /**
@@ -31,6 +32,13 @@ public class DocNoSequenceService {
 
     /** 单号日期格式：yyyyMMdd */
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    /**
+     * 单号日期的业务时区（上线清单补强）：容器/JVM 默认时区非东八区时（如 UTC 镜像），
+     * {@code LocalDate.now()} 会提前 8 小时跨日——DB 侧 serverTimezone=Asia/Shanghai 与单号日期错位，
+     * 单号里的「当天」与服务端认定的「当天」不是同一天。钉定东八区消除该漂移。
+     */
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
 
     /**
      * 原子取号 SQL：
@@ -57,7 +65,7 @@ public class DocNoSequenceService {
      * @return 形如 {@code IN20260814001} 的单号
      */
     public synchronized String next(String prefix) {
-        String date = LocalDate.now().format(DATE_FMT);
+        String date = LocalDate.now(BUSINESS_ZONE).format(DATE_FMT);
         String seqKey = prefix + date;
         Long seq = jdbcTemplate.execute((ConnectionCallback<Long>) con -> {
             try (PreparedStatement insert = con.prepareStatement(NEXT_SEQ_SQL)) {

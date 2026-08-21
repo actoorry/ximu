@@ -85,12 +85,30 @@ try {
     }
 
     # 4.2 带 ADMIN 头建单（原子取号 + 库存联动 + 审计）；settleQty 必须 null（R2-P1-1 起 qty/settleQty 需 >0，0 会被拒）
+    #     X-Request-Id 由下游 RequestTraceIdFilter 回带响应头——验证全链路追踪过滤器在真实进程里生效
     $body = '{"inboundType":"估价","items":[{"orgId":1,"productName":"冒烟测试品","spec":"","grade":"A级","qty":10,"settleQty":null}]}'
+    $adm["X-Request-Id"] = "smoke-req-001"
     $r1 = Invoke-WebRequest -Uri "http://localhost:$Port/api/inventory/inbound" -Method POST -Headers $adm -ContentType "application/json; charset=utf-8" -Body $body -UseBasicParsing -TimeoutSec 8
     $json1 = $r1.Content | ConvertFrom-Json
     if ($json1.code -eq 0 -and $json1.data.inboundNo -match "^IN\d{11}$") {
         Pass "建单成功，原子取号单号=$($json1.data.inboundNo)（IN+日期+3位序号）"
     } else { Fail "建单失败或单号格式异常: $($r1.Content)" }
+    $echoedReqId = $r1.Headers["X-Request-Id"]
+    if ($echoedReqId -eq "smoke-req-001") {
+        Pass "X-Request-Id 回带=$echoedReqId（RequestTraceIdFilter 端到端生效）"
+    } else { Fail "X-Request-Id 未回带（预期 smoke-req-001，实际 $echoedReqId）" }
+
+    # 4.3 畸形 JSON 触发 GlobalExceptionHandler 的 warn 日志（成功路径无 INFO 业务日志），
+    #     断言该日志行带 reqId——证明「过滤器写 MDC → 日志 pattern 渲染」全链路真实生效
+    $adm["X-Request-Id"] = "smoke-req-002"
+    try {
+        Invoke-WebRequest -Uri "http://localhost:$Port/api/inventory/inbound" -Method POST -Headers $adm -ContentType "application/json; charset=utf-8" -Body 'not-a-json' -UseBasicParsing -TimeoutSec 8 | Out-Null
+    } catch { }   # 预期 400，异常吞掉即可，只看日志
+    Start-Sleep -Milliseconds 800
+    $logFile = Join-Path $root "target\smoke-out.log"
+    if (Select-String -Path $logFile -Pattern "reqId=smoke-req-002" -Quiet) {
+        Pass "请求作用域日志已渲染 reqId=smoke-req-002（MDC→日志 全链路生效）"
+    } else { Fail "日志中未找到 reqId=smoke-req-002（MDC 写入或日志渲染断链）" }
 }
 finally {
     # ---------- 5. 停止服务 ----------

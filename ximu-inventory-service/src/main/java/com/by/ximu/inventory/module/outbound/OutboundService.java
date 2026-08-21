@@ -14,9 +14,11 @@ import com.by.ximu.inventory.common.ItemValidators;
 import com.by.ximu.inventory.common.QuantitySupport;
 import com.by.ximu.inventory.common.RetrySupport;
 import com.by.ximu.common.web.audit.OperationLogService;
+import com.by.ximu.common.web.log.BizLog;
 import com.by.ximu.inventory.module.stock.StockOperationService;
 import com.by.ximu.inventory.util.DocNoSequenceService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +38,7 @@ import java.util.stream.Collectors;
  * <p>流转前置校验：仅 CREATED 可批准；非法迁移抛 {@link IllegalStateException}。
  * <p>批准（APPROVED）后按明细逐行联动扣减 {@code inventory_stock}，库存不足抛异常整体回滚。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
@@ -77,6 +80,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
      * <p>兼容：{@code items} 为空但传了旧单品字段（{@code productName/qty}）时自动转成一条明细。
      */
     @Transactional
+    @BizLog(module = "outbound", operation = "CREATE", message = "出库单创建成功（单号取号+明细+审计）")
     public OutboundDetailVO create(OutboundCreateRequest req) {
         // 幂等：requestId 非空时按「requestId + 当前操作人」查重（P1-7：复合幂等键），
         // 命中则返回已存在单据
@@ -84,6 +88,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
         if (StringUtils.hasText(requestId)) {
             Outbound existed = findByIdempotent(requestId);
             if (existed != null) {
+                log.info("出库单幂等命中: requestId={}, 返回既有单据 {}", requestId, existed.getOutboundNo());
                 return toVo(existed, listItems(existed.getId()));
             }
         }
@@ -113,6 +118,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
             // 并发下同 requestId 同时插入，唯一索引兜底：R2-P2-23 撞键后回查 → sleep 退避 → 再回查，
             // 命中返回已存在单据，仍查不到才按并发冲突拒绝（不再裸抛 DuplicateKey 落 400 固定文案）
             Outbound existed = RetrySupport.retryIdempotent(() -> findByIdempotent(requestId));
+            log.info("出库单并发撞键后幂等回查命中: requestId={}, 返回既有单据 {}", requestId, existed.getOutboundNo());
             return toVo(existed, listItems(existed.getId()));
         }
         if (items != null) {
@@ -123,6 +129,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
             }
         }
         operationLogService.recordInTx("outbound", "CREATE", head.getId(), head.getOutboundNo(), OperatorContext.getOperatorName(), req);
+        log.info("出库单创建: {} 明细{}行, 操作人={}", head.getOutboundNo(), items == null ? 0 : items.size(), OperatorContext.getOperatorName());
         return toVo(head, items);
     }
 
@@ -130,6 +137,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
      * 批准：CREATED → APPROVED；按明细逐行联动扣减库存（库存不足抛 {@link IllegalStateException}，整体回滚）。
      */
     @Transactional
+    @BizLog(module = "outbound", operation = "APPROVE", message = "出库单 {id} 批准成功 CREATED→APPROVED（库存联动）")
     public void approve(Long id) {
         Outbound outbound = DocGuard.requireExists(getById(id), "出库单", id);
         Auths.requireRole(Role.APPROVER, Role.ADMIN);
@@ -146,6 +154,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
             stockOperationService.decreaseStock(it.getOrgId(), it.getGrade(), it.getProductName(), it.getMaterial(), it.getSpec(), it.getQty());
         }
         operationLogService.recordInTx("outbound", "APPROVE", id, outbound.getOutboundNo(), OperatorContext.getOperatorName(), null);
+        log.info("出库单流转: {} CREATED -> APPROVED, 库存联动{}行, 操作人={}", outbound.getOutboundNo(), items.size(), OperatorContext.getOperatorName());
     }
 
     /**
@@ -155,6 +164,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
      * 状态条件足以阻断窗口（任何流转必改 status），影响 0 行即并发冲突抛异常，明细删除随之回滚。
      */
     @Transactional
+    @BizLog(module = "outbound", operation = "DELETE", message = "出库单 {id} 删除成功（级联删明细）")
     public void deleteWithItems(Long id) {
         if (id == null) {
             return;
@@ -183,6 +193,7 @@ public class OutboundService extends ServiceImpl<OutboundMapper, Outbound> {
      * <p>编辑与审计同事务；乐观锁冲突时抛异常提示刷新重试。
      */
     @Transactional
+    @BizLog(module = "outbound", operation = "UPDATE", message = "出库单 {id} 头部编辑成功（白名单字段）")
     public void updateHead(Long id, OutboundUpdateRequest req) {
         Outbound existed = DocGuard.requireExists(getById(id), "出库单", id);
         if (!DocStatus.CREATED.name().equals(existed.getStatus())) {
